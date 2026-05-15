@@ -19,6 +19,7 @@ auto_pipeline.py — 全自动文档到视频生成管线
 """
 
 import os
+import re
 import sys
 import json
 import time
@@ -279,6 +280,146 @@ def call_claude_api(api_key: str, document_text: str, max_retries: int = 3,
 
 
 # ── 文件写入 ──────────────────────────────────────────────────────────────
+# ── 时长自动调整 ──────────────────────────────────────────────────────────
+def get_audio_duration(wav_path: str) -> float:
+    """读取音频文件时长（秒）"""
+    import subprocess, json
+    try:
+        result = subprocess.run(
+            ["ffprobe", "-v", "error", "-show_entries", "format=duration",
+             "-of", "json", wav_path],
+            capture_output=True, text=True, timeout=30
+        )
+        data = json.loads(result.stdout)
+        return float(data["format"]["duration"])
+    except Exception:
+        # 降级估算：WAV 16bit 44100Hz
+        st = Path(wav_path).stat().st_size
+        return st / 44100 / 2
+
+
+def adjust_timing(project_dir: str):
+    """根据 TTS 实际时长，按每场景字数比例重新分配时间，留 0.6s 场景切换缓冲"""
+    # ── 1. 读取脚本，按空行分场景 ──
+    script_path = Path(project_dir) / "script.txt"
+    html_path = Path(project_dir) / "index.html"
+    wav_path = Path(project_dir) / "narration.wav"
+
+    script = script_path.read_text(encoding="utf-8")
+    raw_scenes = [s.strip() for s in script.split("\n\n") if s.strip()]
+    if not raw_scenes:
+        warn("脚本无法按空行分场景，跳过时长调整")
+        return
+
+    # ── 2. 每场景有效字数（去换行） ──
+    chars_per_scene = [len(s.replace("\n", "").replace(" ", "")) for s in raw_scenes]
+    total_chars = sum(chars_per_scene)
+    n_scenes = len(raw_scenes)
+
+    # ── 3. 音频时长 ──
+    if not wav_path.exists():
+        warn("未找到 narration.wav，跳过时长调整")
+        return
+    audio_dur = get_audio_duration(str(wav_path))
+
+    # ── 4. 按字数比例分配场景时长，每场景末尾留 0.6s ──
+    pause = 0.6
+    speech_dur = audio_dur - pause * n_scenes  # 纯说话时间
+    if speech_dur <= 0:
+        speech_dur = audio_dur * 0.85
+
+    scene_durations = []
+    for c in chars_per_scene:
+        sd = max(c / total_chars * speech_dur + pause, 1.5)
+        scene_durations.append(round(sd, 1))
+
+    # 微调最后场景使总时长对齐音频
+    diff = audio_dur - sum(scene_durations)
+    scene_durations[-1] = round(scene_durations[-1] + diff, 1)
+    if scene_durations[-1] < 1.5:
+        scene_durations[-1] = 1.5
+
+    total_dur = sum(scene_durations)
+    total_dur_rounded = round(total_dur)
+
+    info(f"音频: {audio_dur:.1f}s | 场景数: {n_scenes} | 重算后总时长: {total_dur:.1f}s")
+    for i, (sd, ch) in enumerate(zip(scene_durations, chars_per_scene)):
+        print(f"  场景{i+1}: {sd:.1f}s ({ch}字, {ch/total_chars*100:.0f}%)")
+
+    # ── 5. 读取 HTML ──
+    html = html_path.read_text(encoding="utf-8")
+
+    # 收集旧场景时间
+    old_starts = []
+    old_durs = []
+    for i in range(1, n_scenes + 1):
+        m_start = re.search(rf'id="scene{i}"[^>]*?data-start="([\d.]+)"', html)
+        m_dur = re.search(rf'id="scene{i}"[^>]*?data-duration="([\d.]+)"', html)
+        if m_start and m_dur:
+            old_starts.append(float(m_start.group(1)))
+            old_durs.append(float(m_dur.group(1)))
+        else:
+            old_starts.append(0)
+            old_durs.append(10)
+
+    # ── 6. 更新 scene div 的 data-start / data-duration ──
+    new_start = 0
+    for i in range(n_scenes):
+        sid = f"scene{i+1}"
+        new_dur = scene_durations[i]
+
+        # 替换 data-start（只替换匹配 id 的那个）
+        html = re.sub(
+            rf'(id="{sid}"[^>]*?)data-start="[\d.]+"',
+            rf'\1data-start="{new_start:.1f}"',
+            html
+        )
+        # 替换 data-duration
+        html = re.sub(
+            rf'(id="{sid}"[^>]*?)data-duration="[\d.]+"',
+            rf'\1data-duration="{new_dur:.1f}"',
+            html
+        )
+        new_start += new_dur
+
+    # ── 7. 更新 GSAP 时间线位置参数 ──
+    #   tl.from("#sceneX...", { ... }, <position>)
+    #   tl.to("#sceneX...", { ... }, <position>)
+    #   position = old_scene_start + offset → new_scene_start + offset
+    for i in range(n_scenes):
+        sid = f"#scene{i+1}"
+        old_ss = old_starts[i]
+        new_ss = sum(scene_durations[:i])  # 累计前面场景时长
+
+        # 替换 tl.from/to 中引用该场景的第三个参数（position）
+        def shift_pos(m, oss=old_ss, nss=new_ss):
+            prefix = m.group(1)
+            old_pos_str = m.group(0)[len(prefix):]
+            old_pos = float(old_pos_str)
+            new_pos = nss + (old_pos - oss)
+            return prefix + f"{new_pos:.1f}"
+
+        pat = (r'(tl\.(?:from|to)\("' + re.escape(sid)
+               + r'[^"]*"[^{}]*{[^}]*}\s*,\s*)[\d.]+')
+        html = re.sub(pat, shift_pos, html)
+
+    # ── 8. 更新 root 和 audio 的 data-duration ──
+    html = re.sub(
+        r'(id="root"[^>]*?)data-duration="[\d.]+"',
+        rf'\1data-duration="{total_dur_rounded}"',
+        html
+    )
+    html = re.sub(
+        r'(<audio[^>]*?)data-duration="[\d.]+"',
+        rf'\1data-duration="{total_dur_rounded}"',
+        html
+    )
+
+    # ── 9. 写回 ──
+    html_path.write_text(html, encoding="utf-8")
+    success(f"时长调整完成: {total_dur:.1f}s，每场景末尾预留 {pause}s 停顿")
+
+
 def write_project_files(project_dir: str, script_content: str, html_content: str):
     """将生成的内容写入项目目录"""
     script_path = Path(project_dir) / "script.txt"
@@ -491,8 +632,10 @@ def main():
         if tts_ok:
             wav_path = Path(project_dir) / "narration.wav"
             if wav_path.exists():
-                duration = wav_path.stat().st_size / 44100 / 2  # 估算: WAV 16bit 44100Hz
-                success(f"配音生成完成: {wav_path.name} (约 {duration:.0f}s)")
+                duration = get_audio_duration(str(wav_path))
+                success(f"配音生成完成: {wav_path.name} ({duration:.1f}s)")
+                # 按字数比例调整场景时长
+                adjust_timing(project_dir)
             else:
                 warn("narration.wav 未找到，检查 TTS 输出")
         else:
