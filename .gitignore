@@ -1,0 +1,8 @@
+node_modules/
+renders/
+output/
+*.mp4
+*.wav
+*.png
+*.jpg
+.DS_Store

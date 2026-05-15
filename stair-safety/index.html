@@ -1,0 +1,211 @@
+<!doctype html>
+<html lang="zh">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=1920, height=1080" />
+    <script src="https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js"></script>
+    <style>
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      html, body { margin: 0; width: 1920px; height: 1080px; overflow: hidden; background: #FFF8E7; font-family: "Microsoft YaHei", "PingFang SC", sans-serif; }
+
+      .scene {
+        position: absolute; inset: 0;
+        width: 1920px; height: 1080px;
+        display: flex; flex-direction: column;
+        justify-content: center; align-items: center;
+        padding: 80px 120px;
+        opacity: 1;
+      }
+      .scene-content {
+        width: 100%; height: 100%;
+        display: flex; flex-direction: column;
+        justify-content: center; align-items: center;
+        gap: 30px;
+        text-align: center;
+      }
+
+      .title-big { font-size: 100px; font-weight: 900; color: #3D2E1E; line-height: 1.3; }
+      .title-medium { font-size: 72px; font-weight: 700; color: #3D2E1E; line-height: 1.4; }
+      .text-body { font-size: 48px; font-weight: 500; color: #5A4A3A; line-height: 1.6; max-width: 1400px; }
+      .text-highlight { font-size: 56px; font-weight: 700; color: #FF6B6B; line-height: 1.5; }
+      .emoji-icon { font-size: 120px; margin-bottom: 20px; }
+      .slogan { font-size: 72px; font-weight: 900; background: linear-gradient(135deg, #FF6B6B, #4ECDC4); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; }
+      .rhyme-box { font-size: 52px; font-weight: 700; color: #3D2E1E; line-height: 2; background: rgba(255,255,255,0.7); padding: 40px 80px; border-radius: 30px; box-shadow: 0 8px 30px rgba(0,0,0,0.08); }
+
+      .scene-s1 { background: linear-gradient(135deg, #FFF8E7, #FFE8D6); }
+      .scene-s2 { background: linear-gradient(135deg, #E8F8F5, #FFF8E7); }
+      .scene-s3 { background: linear-gradient(135deg, #FFF0F0, #FFE8D6); }
+      .scene-s4 { background: linear-gradient(135deg, #E8F4FD, #FFF8E7); }
+      .scene-s5 { background: linear-gradient(135deg, #F3E8FF, #FFF8E7); }
+      .scene-s6 { background: linear-gradient(135deg, #FFF8E7, #E8F8F5); }
+    </style>
+  </head>
+  <body>
+    <div
+      id="root"
+      data-composition-id="main"
+      data-start="0"
+      data-duration="48"
+      data-width="1920"
+      data-height="1080"
+    >
+
+      <!-- ============================================= -->
+      <!-- 场景 1：小兔生日邀请（0s-8s）                   -->
+      <!-- ============================================= -->
+      <div id="scene1" class="scene scene-s1 clip" data-start="0" data-duration="8" data-track-index="1">
+        <div class="scene-content">
+          <div class="emoji-icon">🐰🎉</div>
+          <div class="title-big">小兔的生日邀请</div>
+          <div class="text-body">今天小兔过生日，邀请我们去她家玩！</div>
+          <div class="text-body" style="font-size:36px; color:#FF6B6B;">小兔家住在 5 楼，我们要走楼梯上去</div>
+        </div>
+      </div>
+
+      <!-- ============================================= -->
+      <!-- 场景 2：靠右走（8s-17s）                        -->
+      <!-- ============================================= -->
+      <div id="scene2" class="scene scene-s2 clip" data-start="8" data-duration="9" data-track-index="2">
+        <div class="scene-content">
+          <div class="emoji-icon">🚶➡️</div>
+          <div class="text-body">
+            上下楼梯要<strong style="color:#4ECDC4;">靠右走</strong>
+          </div>
+          <div style="display:flex; align-items:center; gap:20px; margin-top:10px; flex-wrap:wrap; justify-content:center;">
+            <span style="font-size:80px;">🙅</span>
+            <div class="text-highlight">不能乱跑，不能挤</div>
+          </div>
+          <div class="text-body" style="font-size:36px; color:#FF6B6B;">
+            ⚠️ 小心头碰头！
+          </div>
+        </div>
+      </div>
+
+      <!-- ============================================= -->
+      <!-- 场景 3：安全走楼梯（17s-24s）                    -->
+      <!-- ============================================= -->
+      <div id="scene3" class="scene scene-s3 clip" data-start="17" data-duration="7" data-track-index="3">
+        <div class="scene-content">
+          <div class="emoji-icon">🧑‍🤝‍🧑🪜</div>
+          <div class="text-body">
+            手扶栏杆，<strong style="color:#4ECDC4;">一步一级</strong>
+          </div>
+          <div style="display:flex; align-items:center; gap:30px; margin-top:10px; flex-wrap:wrap; justify-content:center;">
+            <div style="font-size:48px; background:#FFE8D6; padding:15px 30px; border-radius:15px;">
+              👀 眼睛看路
+            </div>
+            <div style="font-size:48px; background:#E8F8F5; padding:15px 30px; border-radius:15px;">
+              🚫 不能跳台阶
+            </div>
+            <div style="font-size:48px; background:#F3E8FF; padding:15px 30px; border-radius:15px;">
+              🚫 不能推别人
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ============================================= -->
+      <!-- 场景 4：安全口诀（24s-34s）                      -->
+      <!-- ============================================= -->
+      <div id="scene4" class="scene scene-s4 clip" data-start="24" data-duration="10" data-track-index="4">
+        <div class="scene-content">
+          <div class="emoji-icon">📢✨</div>
+          <div class="text-body">跟老师一起念安全口诀：</div>
+          <div class="rhyme-box">
+            一层楼，两层楼，<br>
+            上下楼梯靠右走。<br>
+            你靠右，我靠右，<br>
+            不着急，不拥挤，<br>
+            碰不到头！
+          </div>
+        </div>
+      </div>
+
+      <!-- ============================================= -->
+      <!-- 场景 5：提醒朋友（34s-43s）                      -->
+      <!-- ============================================= -->
+      <div id="scene5" class="scene scene-s5 clip" data-start="34" data-duration="9" data-track-index="5">
+        <div class="scene-content">
+          <div class="emoji-icon">💪🗣️</div>
+          <div class="text-body">
+            看到朋友做<strong style="color:#FF6B6B;">危险动作</strong>怎么办？
+          </div>
+          <div style="display:flex; align-items:center; gap:20px; margin-top:10px;">
+            <span style="font-size:80px;">🗣️</span>
+            <div>
+              <div class="text-highlight" style="font-size:48px;">"不可以哦！要小心！"</div>
+              <div class="text-body" style="font-size:36px; color:#4ECDC4;">我们要互相提醒，安全第一</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ============================================= -->
+      <!-- 场景 6：出发（43s-48s）                          -->
+      <!-- ============================================= -->
+      <div id="scene6" class="scene scene-s6 clip" data-start="43" data-duration="5" data-track-index="6">
+        <div class="scene-content">
+          <div class="emoji-icon">🎉🏠</div>
+          <div class="slogan">排好队，去小兔家啦！</div>
+          <div class="text-body" style="font-size:36px; margin-top:20px;">
+            手扶栏杆，一个接一个，慢慢走 🐰✨
+          </div>
+        </div>
+      </div>
+
+      <audio
+        id="narration"
+        data-start="0"
+        data-duration="48"
+        data-track-index="0"
+        src="narration.wav"
+        data-volume="1"
+      ></audio>
+
+    </div>
+
+    <script>
+      window.__timelines = window.__timelines || {};
+      const tl = gsap.timeline({ paused: true });
+
+      // ========== 场景 1：小兔生日邀请 ==========
+      tl.from("#scene1 .emoji-icon", { scale: 0, opacity: 0, duration: 0.6, ease: "back.out(1.7)" }, 0.2);
+      tl.from("#scene1 .title-big", { y: 60, opacity: 0, duration: 0.5, ease: "power3.out" }, 0.6);
+      tl.from("#scene1 .scene-content > div:nth-child(3)", { y: 40, opacity: 0, duration: 0.5, ease: "power2.out" }, 1.0);
+      tl.from("#scene1 .scene-content > div:nth-child(4)", { y: 20, opacity: 0, duration: 0.5, ease: "power2.out" }, 1.5);
+
+      // ========== 场景 2：靠右走 ==========
+      tl.from("#scene2 .emoji-icon", { scale: 0, opacity: 0, duration: 0.5, ease: "back.out(1.5)" }, 8.2);
+      tl.from("#scene2 .scene-content > div:nth-child(2)", { x: -40, opacity: 0, duration: 0.5, ease: "power3.out" }, 8.5);
+      tl.from("#scene2 .scene-content > div:nth-child(3)", { x: 40, opacity: 0, duration: 0.5, ease: "power2.out" }, 9.0);
+      tl.from("#scene2 .scene-content > div:nth-child(4)", { y: 20, opacity: 0, duration: 0.4, ease: "power1.out" }, 9.5);
+
+      // ========== 场景 3：安全走楼梯 ==========
+      tl.from("#scene3 .emoji-icon", { rotation: -15, opacity: 0, duration: 0.5, ease: "power3.out" }, 17.2);
+      tl.from("#scene3 .scene-content > div:nth-child(2)", { y: 40, opacity: 0, duration: 0.5, ease: "power3.out" }, 17.5);
+      tl.from("#scene3 .scene-content > div:nth-child(3) > div:nth-child(1)", { scale: 0.8, opacity: 0, duration: 0.4, ease: "back.out(1.4)" }, 18.0);
+      tl.from("#scene3 .scene-content > div:nth-child(3) > div:nth-child(2)", { scale: 0.8, opacity: 0, duration: 0.4, ease: "back.out(1.4)" }, 18.3);
+      tl.from("#scene3 .scene-content > div:nth-child(3) > div:nth-child(3)", { scale: 0.8, opacity: 0, duration: 0.4, ease: "back.out(1.4)" }, 18.6);
+
+      // ========== 场景 4：安全口诀 ==========
+      tl.from("#scene4 .emoji-icon", { scale: 0, opacity: 0, duration: 0.5, ease: "back.out(1.5)" }, 24.2);
+      tl.from("#scene4 .scene-content > div:nth-child(2)", { x: -50, opacity: 0, duration: 0.5, ease: "power3.out" }, 24.5);
+      tl.from("#scene4 .scene-content > div:nth-child(3)", { y: 50, opacity: 0, duration: 0.6, ease: "power3.out" }, 25.0);
+
+      // ========== 场景 5：提醒朋友 ==========
+      tl.from("#scene5 .emoji-icon", { rotation: 20, opacity: 0, duration: 0.5, ease: "power3.out" }, 34.2);
+      tl.from("#scene5 .scene-content > div:nth-child(2)", { y: 40, opacity: 0, duration: 0.5, ease: "power3.out" }, 34.5);
+      tl.from("#scene5 .scene-content > div:nth-child(3)", { x: 40, opacity: 0, duration: 0.5, ease: "power2.out" }, 35.0);
+
+      // ========== 场景 6：出发 ==========
+      tl.from("#scene6 .emoji-icon", { scale: 0, opacity: 0, duration: 0.5, ease: "back.out(1.5)" }, 43.2);
+      tl.from("#scene6 .scene-content > div:nth-child(2)", { y: 50, opacity: 0, duration: 0.6, ease: "power3.out" }, 43.5);
+      tl.from("#scene6 .scene-content > div:nth-child(3)", { y: 30, opacity: 0, duration: 0.5, ease: "power2.out" }, 44.0);
+
+      // ========== 最后淡出 ==========
+      tl.to("#scene6 .scene-content", { opacity: 0, duration: 1.0, ease: "power2.in" }, 46.5);
+
+      window.__timelines["main"] = tl;
+    </script>
+  </body>
+</html>
