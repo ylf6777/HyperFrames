@@ -6,7 +6,7 @@ import os
 import shutil
 from pathlib import Path
 
-from pipeline.utils import info, success, warn, error, step, find_project_dir
+from pipeline.utils import info, success, warn, error, step, find_project_dir, check_disk_space
 from pipeline.reader import read_document
 from pipeline.llm import call_claude_api
 from pipeline.tts import run_tts
@@ -153,6 +153,13 @@ def generate_video(
     # ── Step 5: 渲染 ──
     step(5 if not skip_llm else 4, total_steps, "HyperFrames 视频渲染")
     _progress("视频渲染中（这可能需要几分钟）...")
+
+    # 渲染前检查磁盘空间
+    ok, free_mb = check_disk_space(project_dir)
+    if not ok:
+        error(f"磁盘空间不足（剩余 {free_mb}MB），无法渲染")
+        return result
+
     output_mp4 = run_render(project_dir)
     result["steps"]["render"] = output_mp4 is not None
 

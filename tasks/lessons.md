@@ -1,5 +1,41 @@
 # 经验教训
 
+## 2026-05-16: adjust_timing fallback 路径所有场景 data-start=0 修复
+
+### 问题
+`_fallback_durations()` 返回的 `scene_times` 是 `[(0, sd), (0, sd), ...]`（全是 0 起始）。`adjust_timing()` 第 443 行用 `if scene_times and ...` 判断是否使用 TTS 时间，但 `scene_times` 在 fallback 路径也是 truthy（空列表 != None），导致所有场景 `data-start=0`，视频总长变成最长单场景时长而非总时长。
+
+### 根因
+`aligned`（TTS 对齐成功 → list，失败 → None）和 `scene_times`（两个路径都赋值）两个变量混用，判断条件用了错误的一个。
+
+### 修复
+所有 `if scene_times and ...` 改为 `if aligned is not None and ...`，区分 TTS 对齐成功和 fallback 路径。
+
+## 2026-05-16: renderer.py glob 返回无序列表取到旧 mp4
+
+### 问题
+多次渲染后 `renders/` 目录累积多个 mp4。`list(search_dir.glob("*.mp4"))` 返回顺序由文件系统决定（非 mtime 排序），可能取到旧的错误版本。
+
+### 修复
+`sorted(search_dir.glob("*.mp4"), key=lambda f: f.stat().st_mtime, reverse=True)` 取最新的。
+
+## 2026-05-16: 路径穿越漏洞修复 + 磁盘空间检查
+
+### 路径穿越
+- 用户上传的 `file.filename` 可能包含 `../`、`..\\` 等路径穿越序列
+- **修复**：用 `Path(name).name` 去掉目录部分，然后替换 `<>:"/\\|?*` 危险字符，最后 `.resolve()` 验证路径仍在 DOCS_DIR 内
+- **两点防御**：入口消毒（`sanitize_filename`）+ 出口验证（`.resolve()` + `startswith` 检查）
+
+### 磁盘空间检查
+- HyperFrames 渲染会生成临时文件，磁盘满时渲染失败且难以排查
+- **修复**：在 `server.py` 的 `run_task()` 和 `pipeline.py` 渲染前用 `shutil.disk_usage()` 检查剩余空间
+- 默认阈值 500MB，不足时提前报错，避免渲染半途失败
+
+### 函数设计
+- `sanitize_filename()` 放在 `pipeline/utils.py` 作为共享工具函数
+- `check_disk_space()` 同样放在 `utils.py`，默认 500MB 阈值但可配置
+- 磁盘检查在无法获取信息时默认放行（`return (True, -1)`），不阻塞正常流程
+
 ## 2026-05-16: align_scenes_by_text 段落匹配 off-by-one 修复
 
 ### 问题

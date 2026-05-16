@@ -3,6 +3,7 @@
 """
 
 import json
+import os
 import re
 import subprocess
 from pathlib import Path
@@ -371,7 +372,7 @@ def adjust_timing(project_dir):
 
     chars_per_scene = [len(s.replace("\n", "").replace(" ", "")) for s in raw_scenes]
     total_chars = sum(chars_per_scene) if sum(chars_per_scene) > 0 else 1
-    pause = 0.6
+    pause = float(os.environ.get("SCENE_PAUSE", "0.6"))
 
     if not wav_path.exists():
         warn("未找到 narration.wav，跳过时长调整")
@@ -414,11 +415,14 @@ def adjust_timing(project_dir):
 
     info(f"音频: {audio_dur:.1f}s | 场景数: {n_scenes}")
     for i, (sd, ch) in enumerate(zip(scene_durations, chars_per_scene)):
-        if scene_times and i < len(scene_times) and not (has_title_scene and i == 0):
-            s, e = scene_times[i]
+        if aligned is not None and i < len(aligned) and not (has_title_scene and i == 0):
+            s, e = aligned[i]
             print(f"  场景{i+1}: {sd:.1f}s [{s:.1f}-{e:.1f}] ({ch}字, {ch/total_chars*100:.0f}%)")
         else:
-            print(f"  场景{i+1}: {sd:.1f}s ({ch}字, {ch/total_chars*100:.0f}%)")
+            # 计算顺序堆叠的起始位置
+            fallback_start = sum(scene_durations[:i])
+            fallback_end = fallback_start + sd
+            print(f"  场景{i+1}: {sd:.1f}s [{fallback_start:.1f}-{fallback_end:.1f}] ({ch}字, {ch/total_chars*100:.0f}%)")
 
     html = re.sub(r'id="scene-s(\d+)"', r'id="scene\1"', html_content)
 
@@ -439,8 +443,8 @@ def adjust_timing(project_dir):
         new_dur = scene_durations[i]
         old_ss = old_starts[i]
         # 使用 TTS 对齐的起始时间，让场景在对应旁白播放时出现
-        if scene_times and i < len(scene_times) and not (has_title_scene and i == 0):
-            new_ss = scene_times[i][0]
+        if aligned is not None and i < len(aligned) and not (has_title_scene and i == 0):
+            new_ss = aligned[i][0]
         else:
             new_ss = sum(scene_durations[:i])  # 降级：顺序堆叠
 
@@ -507,17 +511,17 @@ def adjust_timing(project_dir):
     scene_ends = []
     cum = 0
     for i in range(n_scenes):
-        if scene_times and i < len(scene_times) and not (has_title_scene and i == 0):
-            st = scene_times[i][0]
+        if aligned is not None and i < len(aligned) and not (has_title_scene and i == 0):
+            st = aligned[i][0]
         else:
             st = cum
             cum += scene_durations[i]
         scene_ends.append(st + scene_durations[i])
-    # 对于 TTS 对齐的场景，the end also needs to consider the TTS end + pause
-    if scene_times:
+    # 对于 TTS 对齐的场景，结束时间也要考虑 TTS 结束 + 停顿
+    if aligned is not None:
         for i in range(n_scenes):
-            if i < len(scene_times) and not (has_title_scene and i == 0):
-                tts_end = scene_times[i][1] + pause
+            if i < len(aligned) and not (has_title_scene and i == 0):
+                tts_end = aligned[i][1] + pause
                 if tts_end > scene_ends[i]:
                     scene_ends[i] = tts_end
 

@@ -20,6 +20,7 @@ from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 
 from pipeline import generate_video
+from pipeline.utils import sanitize_filename, check_disk_space
 
 # ── 配置 ───────────────────────────────────────────────────────────
 BASE_DIR = Path(__file__).parent
@@ -28,9 +29,10 @@ TASKS_DIR = DATA_DIR / "tasks"
 VIDEOS_DIR = DATA_DIR / "videos"
 DOCS_DIR = DATA_DIR / "docs"
 DB_PATH = DATA_DIR / "tasks.db"
-MAX_CONCURRENT = 2       # 同时最多渲染几个
-WORKER_SLEEP = 2         # 每次轮询间隔（秒）
-ORPHAN_TIMEOUT = 300     # 孤儿任务超时（秒）
+MAX_CONCURRENT = int(os.environ.get("MAX_CONCURRENT", "2"))
+WORKER_SLEEP = int(os.environ.get("WORKER_SLEEP", "2"))
+ORPHAN_TIMEOUT = int(os.environ.get("ORPHAN_TIMEOUT", "300"))
+MAX_FILE_SIZE_MB = int(os.environ.get("MAX_FILE_SIZE_MB", "50"))
 
 for d in (DATA_DIR, TASKS_DIR, VIDEOS_DIR, DOCS_DIR):
     d.mkdir(parents=True, exist_ok=True)
@@ -150,7 +152,14 @@ def run_task(task_id: str):
     if not task:
         return
 
-    doc_path = str(DOCS_DIR / f"{task_id}_{task['filename']}")
+    safe_name = sanitize_filename(task["filename"])
+    doc_path = str((DOCS_DIR / f"{task_id}_{safe_name}").resolve())
+
+    # 磁盘空间检查：至少 500MB 剩余
+    ok, free_mb = check_disk_space(DATA_DIR)
+    if not ok:
+        db_update_task(task_id, status="failed", error=f"磁盘空间不足（剩余 {free_mb}MB，需要 500MB）", progress="失败", updated_at=time.time())
+        return
 
     def on_progress(msg: str):
         db_update_task(task_id, progress=msg, updated_at=time.time())
@@ -230,13 +239,17 @@ async def create_task(file: UploadFile = File(...)):
 
     # 限制文件大小（50MB）
     content = await file.read()
-    if len(content) > 50 * 1024 * 1024:
-        raise HTTPException(400, "文件大小超过 50MB 限制")
+    if len(content) > MAX_FILE_SIZE_MB * 1024 * 1024:
+        raise HTTPException(400, f"文件大小超过 {MAX_FILE_SIZE_MB}MB 限制")
 
     task_id = uuid.uuid4().hex[:12]
-    db_create_task(task_id, file.filename)
+    safe_name = sanitize_filename(file.filename)
+    db_create_task(task_id, safe_name)
 
-    doc_path = DOCS_DIR / f"{task_id}_{file.filename}"
+    doc_path = (DOCS_DIR / f"{task_id}_{safe_name}").resolve()
+    # 验证最终路径仍在 DOCS_DIR 内（防御路径穿越）
+    if not str(doc_path).startswith(str(DOCS_DIR.resolve())):
+        raise HTTPException(400, "非法文件名")
     doc_path.write_bytes(content)
 
     return {"task_id": task_id, "status": "pending"}

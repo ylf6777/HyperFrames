@@ -3,8 +3,11 @@
 """
 
 import os
+import shutil
 import subprocess
 from pathlib import Path
+
+HYPERFRAMES_VERSION = os.environ.get("HYPERFRAMES_VERSION", "0.6.6")
 
 
 class Color:
@@ -73,6 +76,27 @@ def run_command(cmd: list[str], cwd: str | None = None, desc: str = "", timeout:
         return False
 
 
+def sanitize_filename(name: str, max_len: int = 128) -> str:
+    """消毒文件名，移除路径穿越和危险字符，仅保留安全的文件名部分。"""
+    # 只取文件名部分（去掉目录路径）
+    name = Path(name).name
+    # 替换 Windows/Linux 路径分隔符和遍历序列
+    unsafe = set('<>:"/\\|?*')
+    safe = "".join(c if c not in unsafe else "_" for c in name)
+    # 限制长度
+    return safe[:max_len]
+
+
+def check_disk_space(path: str | Path, min_free_mb: int = 500) -> tuple[bool, int]:
+    """检查磁盘剩余空间是否 >= min_free_mb，返回 (是否充足, 剩余MB)"""
+    try:
+        usage = shutil.disk_usage(path)
+        free_mb = usage.free // (1024 * 1024)
+        return (free_mb >= min_free_mb, free_mb)
+    except Exception:
+        return (True, -1)  # 无法检查时默认放行
+
+
 def find_project_dir(project_name: str, base_dir: str | None = None) -> str:
     """查找项目目录，不存在则创建并初始化 HyperFrames 项目"""
     base = Path(base_dir) if base_dir else Path.cwd()
@@ -82,7 +106,7 @@ def find_project_dir(project_name: str, base_dir: str | None = None) -> str:
         info(f"项目目录不存在，创建: {project_path}")
         project_path.mkdir(parents=True, exist_ok=True)
         init_result = run_command(
-            ["npx", "--yes", "hyperframes@0.6.6", "init", project_name],
+            ["npx", "--yes", f"hyperframes@{HYPERFRAMES_VERSION}", "init", project_name],
             cwd=str(base),
             desc="hyperframes init",
             timeout=120,
