@@ -316,6 +316,34 @@ def list_tasks(limit: int = 20):
     return [dict(r) for r in rows]
 
 
+# ── LLM 缓存管理 ────────────────────────────────────────────────
+from pipeline.llm import LLMCache
+
+_llm_cache = LLMCache()
+
+
+@app.get("/api/cache")
+def get_cache():
+    """查看 LLM 缓存状态"""
+    stats = _llm_cache.stats()
+    entries = _llm_cache.list_entries()
+    return {"stats": stats, "entries": entries}
+
+
+@app.delete("/api/cache")
+def clear_cache():
+    """清空所有 LLM 缓存"""
+    _llm_cache.clear()
+    return {"status": "ok"}
+
+
+@app.delete("/api/cache/{key}")
+def delete_cache_entry(key: str):
+    """删除指定缓存"""
+    ok = _llm_cache.delete(key)
+    return {"status": "ok" if ok else "not_found"}
+
+
 if __name__ == "__main__":
     import uvicorn
 

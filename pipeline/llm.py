@@ -2,8 +2,12 @@
 LLM 内容生成：文档总结 → 剧本 + 分镜 HTML
 """
 
+import hashlib
+import json
+import os
 import re
 import time
+from pathlib import Path
 from typing import Tuple
 
 SUMMARIZE_PROMPT = """你是一个幼儿教育专家。分析下面的教案文档，提取一份结构化的摘要，供后续视频制作使用。
@@ -119,6 +123,113 @@ window.__timelines["main"] = gsap.timeline({ paused: true });
 
 输出格式: 先输出 script.txt 内容（用 ```script 标记），再输出 index.html 内容（用 ```html 标记）。"""
 
+# ── LLM 缓存 ─────────────────────────────────────────────────
+_PROMPT_HASH = hashlib.sha256(
+    (SUMMARIZE_PROMPT + GENERATION_SYSTEM_PROMPT).encode()
+).hexdigest()[:12]
+
+CACHE_TTL_DAYS = int(os.environ.get("LLM_CACHE_TTL_DAYS", "7"))
+_DEFAULT_CACHE_DIR = os.environ.get("LLM_CACHE_DIR") or str(
+    Path(__file__).resolve().parent.parent / "_server_data" / "llm_cache"
+)
+
+
+class LLMCache:
+    """LLM 响应缓存：内容 hash + 模型名 + 提示词版本 → 7 天自动淘汰"""
+
+    def __init__(self, cache_dir: str = _DEFAULT_CACHE_DIR):
+        self.cache_dir = Path(cache_dir)
+        self.cache_dir.mkdir(parents=True, exist_ok=True)
+
+    def _make_key(self, text: str, model: str) -> str:
+        text_hash = hashlib.sha256(text.encode()).hexdigest()[:16]
+        raw = f"{text_hash}||{model}||{_PROMPT_HASH}"
+        return hashlib.sha256(raw.encode()).hexdigest()[:16]
+
+    def get(self, text: str, model: str) -> tuple[str, str] | None:
+        """读取缓存，命中时更新 accessed_at"""
+        key = self._make_key(text, model)
+        path = self.cache_dir / f"{key}.json"
+        if not path.exists():
+            return None
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+            data["accessed_at"] = time.time()
+            path.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+            return data["script"], data["html"]
+        except Exception:
+            return None
+
+    def put(self, text: str, model: str, script: str, html: str):
+        """写入缓存，写入后触发淘汰检查"""
+        key = self._make_key(text, model)
+        now = time.time()
+        data = {
+            "key": key,
+            "model": model,
+            "prompt_version": _PROMPT_HASH,
+            "script": script,
+            "html": html,
+            "created_at": now,
+            "accessed_at": now,
+        }
+        (self.cache_dir / f"{key}.json").write_text(
+            json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+        self._evict_old()
+
+    def _evict_old(self):
+        """删除超过 TTL 天未被访问的缓存"""
+        cutoff = time.time() - CACHE_TTL_DAYS * 86400
+        for f in self.cache_dir.glob("*.json"):
+            try:
+                data = json.loads(f.read_text(encoding="utf-8"))
+                if data.get("accessed_at", 0) < cutoff:
+                    f.unlink()
+            except Exception:
+                f.unlink(missing_ok=True)
+
+    def list_entries(self) -> list[dict]:
+        """列出所有缓存条目（不含 script/html 内容）"""
+        entries = []
+        for f in self.cache_dir.glob("*.json"):
+            try:
+                data = json.loads(f.read_text(encoding="utf-8"))
+                entries.append({
+                    "key": data.get("key", f.stem),
+                    "model": data.get("model", "?"),
+                    "created_at": data.get("created_at", 0),
+                    "accessed_at": data.get("accessed_at", 0),
+                    "size_bytes": f.stat().st_size,
+                })
+            except Exception:
+                pass
+        entries.sort(key=lambda e: e["accessed_at"], reverse=True)
+        return entries
+
+    def clear(self):
+        """清空所有缓存"""
+        for f in self.cache_dir.glob("*.json"):
+            f.unlink(missing_ok=True)
+
+    def delete(self, key: str) -> bool:
+        """删除指定缓存，返回是否成功"""
+        path = self.cache_dir / f"{key}.json"
+        if path.exists():
+            path.unlink()
+            return True
+        return False
+
+    def stats(self) -> dict:
+        """缓存统计"""
+        entries = self.list_entries()
+        return {
+            "count": len(entries),
+            "size_bytes": sum(e["size_bytes"] for e in entries),
+            "ttl_days": CACHE_TTL_DAYS,
+            "cache_dir": str(self.cache_dir),
+        }
+
 
 def call_claude_api(
     api_key: str,
@@ -126,8 +237,20 @@ def call_claude_api(
     max_retries: int = 3,
     api_base: str | None = None,
     model: str = "claude-sonnet-4-6",
+    cache_dir: str | None = None,
 ) -> Tuple[str, str]:
-    """两轮 LLM 调用: 先总结文档, 再根据总结生成剧本+HTML，返回 (script, html)。"""
+    """两轮 LLM 调用: 先总结文档, 再根据总结生成剧本+HTML，返回 (script, html)。
+
+    支持缓存：相同文档+模型+提示词版本时自动跳过 API 调用。
+    """
+    cache = LLMCache(cache_dir or _DEFAULT_CACHE_DIR)
+
+    # 检查缓存
+    cached = cache.get(document_text, model)
+    if cached:
+        print(f"[llm] 缓存命中（{model}），跳过 API 调用")
+        return cached
+
     try:
         import anthropic
     except ImportError:
@@ -213,6 +336,8 @@ def call_claude_api(
     if "data-composition-id" not in html_content:
         print("[llm] 警告: 生成的 HTML 缺少 data-composition-id，可能不是有效的 HyperFrames 合成")
 
+    # 写入缓存
+    cache.put(document_text, model, script_content, html_content)
     return script_content, html_content
 
 

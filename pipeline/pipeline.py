@@ -105,9 +105,11 @@ def generate_video(
             _cleanup()
             return result
 
+        llm_cache_dir = str(Path(__file__).resolve().parent.parent / "_server_data" / "llm_cache")
         try:
             _progress("AI 内容生成中...")
-            script_content, html_content = call_claude_api(_api_key, document_text, api_base=_api_base, model=_model)
+            script_content, html_content = call_claude_api(
+                _api_key, document_text, api_base=_api_base, model=_model, cache_dir=llm_cache_dir)
         except Exception as e:
             error(f"AI 内容生成失败: {e}")
             _cleanup()
