@@ -97,21 +97,57 @@ def check_disk_space(path: str | Path, min_free_mb: int = 500) -> tuple[bool, in
         return (True, -1)  # 无法检查时默认放行
 
 
+_TEMPLATE_DIR: str | None = None
+
+
+def ensure_template(project_base_dir: str | Path) -> str:
+    """确保共享模板存在（全局只 init 一次），返回模板路径"""
+    base = Path(project_base_dir)
+    template_dir = base / "_server_data" / "template"
+
+    if not template_dir.exists():
+        info("创建共享 HyperFrames 模板（仅一次）...")
+        template_dir.mkdir(parents=True, exist_ok=True)
+        result = run_command(
+            ["npx", "--yes", f"hyperframes@{HYPERFRAMES_VERSION}", "init", "template"],
+            cwd=str(template_dir.parent),
+            desc="模板初始化",
+            timeout=120,
+        )
+        if result:
+            success("共享模板创建完成")
+        else:
+            warn("模板初始化可能不完整")
+
+    return str(template_dir)
+
+
 def find_project_dir(project_name: str, base_dir: str | None = None) -> str:
-    """查找项目目录，不存在则创建并初始化 HyperFrames 项目"""
+    """查找项目目录，不存在则从共享模板创建（无 node_modules / npm install）。"""
     base = Path(base_dir) if base_dir else Path.cwd()
     project_path = base / project_name
 
     if not project_path.exists():
-        info(f"项目目录不存在，创建: {project_path}")
         project_path.mkdir(parents=True, exist_ok=True)
-        init_result = run_command(
-            ["npx", "--yes", f"hyperframes@{HYPERFRAMES_VERSION}", "init", project_name],
-            cwd=str(base),
-            desc="hyperframes init",
-            timeout=120,
-        )
-        if not init_result:
-            warn("HyperFrames 初始化可能不完整，继续执行...")
+
+        # 从共享模板复制 hyperframes.json（tiny, ~300B）
+        global _TEMPLATE_DIR
+        if _TEMPLATE_DIR is None:
+            _TEMPLATE_DIR = ensure_template(base)
+        tmpl = Path(_TEMPLATE_DIR)
+        for f in ("hyperframes.json",):
+            src = tmpl / f
+            if src.exists():
+                shutil.copy2(str(src), str(project_path / f))
+
+        info(f"项目目录已创建: {project_path}")
 
     return str(project_path)
+
+
+def remove_project_dir(project_dir: str):
+    """删除项目目录（服务器临时任务用）。"""
+    try:
+        shutil.rmtree(project_dir, ignore_errors=True)
+    except Exception:
+        pass

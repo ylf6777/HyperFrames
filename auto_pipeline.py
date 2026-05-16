@@ -38,7 +38,7 @@ def main():
         """,
     )
     parser.add_argument("input", help="输入文档路径 (.docx / .doc / .txt / .pdf)")
-    parser.add_argument("--project", "-p", default="zoo-safety", help="项目目录名 (默认: zoo-safety)")
+    parser.add_argument("--project", "-p", default=None, help="项目目录名 (默认: 输入文件名)")
     parser.add_argument("--output", "-o", default=None, help="输出视频文件名 (默认自动生成)")
     parser.add_argument("--api-key", "-k", default=None, help="API Key (默认用 ANTHROPIC_API_KEY 环境变量)")
     parser.add_argument("--api-base", default=None, help="API Base URL (默认用 ANTHROPIC_BASE_URL 环境变量或官方地址)")
@@ -66,9 +66,6 @@ def main():
         print(f"{Color.GREEN}{Color.BOLD}  生成完成！{Color.RESET}")
         if result["video_path"]:
             print(f"  {Color.GREEN}视频: {result['video_path']}{Color.RESET}")
-        print(f"  {Color.DIM}项目: {result['project_dir']}{Color.RESET}")
-        print(f"  {Color.DIM}脚本: {result['script_path']}{Color.RESET}")
-        print(f"  {Color.DIM}合成: {result['html_path']}{Color.RESET}")
         print(f"{Color.BOLD}{'=' * 54}{Color.RESET}\n")
     else:
         sys.exit(1)

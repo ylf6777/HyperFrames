@@ -4,9 +4,10 @@
 
 import os
 import shutil
+import tempfile
 from pathlib import Path
 
-from pipeline.utils import info, success, warn, error, step, find_project_dir, check_disk_space
+from pipeline.utils import info, success, warn, error, step, find_project_dir, check_disk_space, ensure_template
 from pipeline.reader import read_document
 from pipeline.llm import call_claude_api
 from pipeline.tts import run_tts
@@ -72,8 +73,27 @@ def generate_video(
     info(f"读取到 {len(document_text)} 字符")
     _progress("文档读取完成")
 
-    # ── Step 2: LLM 内容生成 ──
+    # ── 创建临时工作目录 ──
+    _cleanup_project: str | None = None
     project_dir: str | None = None
+    if base_dir or project:
+        project_dir = find_project_dir(project_name, base_dir)
+    else:
+        _cleanup_project = tempfile.mkdtemp(prefix="hf_")
+        tmpl_src = Path(ensure_template(Path.cwd())) / "hyperframes.json"
+        if tmpl_src.exists():
+            shutil.copy2(str(tmpl_src), str(Path(_cleanup_project) / "hyperframes.json"))
+        project_dir = _cleanup_project
+
+    result["project_dir"] = project_dir
+    result["script_path"] = str(Path(project_dir) / "script.txt")
+    result["html_path"] = str(Path(project_dir) / "index.html")
+
+    def _cleanup():
+        if _cleanup_project:
+            shutil.rmtree(_cleanup_project, ignore_errors=True)
+
+    # ── Step 2: LLM 内容生成 ──
     if not skip_llm:
         step(2, total_steps, "AI 生成视频内容")
         _api_key = api_key or os.environ.get("ANTHROPIC_API_KEY")
@@ -82,6 +102,7 @@ def generate_video(
 
         if not _api_key:
             error("需要 API Key！可通过 ANTHROPIC_API_KEY 环境变量或 --api-key 参数设置")
+            _cleanup()
             return result
 
         try:
@@ -89,21 +110,21 @@ def generate_video(
             script_content, html_content = call_claude_api(_api_key, document_text, api_base=_api_base, model=_model)
         except Exception as e:
             error(f"AI 内容生成失败: {e}")
+            _cleanup()
             return result
 
         result["steps"]["llm"] = True
 
         try:
-            project_dir = find_project_dir(project_name, base_dir)
             write_project_files(project_dir, script_content, html_content)
         except Exception as e:
             error(f"写入项目文件失败: {e}")
+            _cleanup()
             return result
 
         info("LLM 内容生成完成 ✓")
     else:
         step(2, total_steps, "跳过 LLM 内容生成")
-        project_dir = find_project_dir(project_name, base_dir)
         script_path = Path(project_dir) / "script.txt"
         html_path = Path(project_dir) / "index.html"
         if script_path.exists():
@@ -112,17 +133,15 @@ def generate_video(
             warn(f"未找到 {script_path}，将使用文档内容作为脚本")
             script_path.write_text(document_text[:500], encoding="utf-8")
 
-    result["project_dir"] = project_dir
-    result["script_path"] = str(Path(project_dir) / "script.txt") if project_dir else None
-    result["html_path"] = str(Path(project_dir) / "index.html") if project_dir else None
-
     if dry_run:
         info("Dry-run 模式，跳过 TTS 和渲染")
         result["success"] = True
+        _cleanup()
         return result
 
     if not project_dir:
         error("项目目录未确定，无法继续")
+        _cleanup()
         return result
 
     # ── Step 3: 同步画面文字到旁白脚本 ──
@@ -158,6 +177,7 @@ def generate_video(
     ok, free_mb = check_disk_space(project_dir)
     if not ok:
         error(f"磁盘空间不足（剩余 {free_mb}MB），无法渲染")
+        _cleanup()
         return result
 
     output_mp4 = run_render(project_dir)
@@ -176,6 +196,7 @@ def generate_video(
             shutil.copy2(str(output_mp4), str(output_path))
         except Exception as e:
             error(f"复制视频文件失败: {e}")
+            _cleanup()
             return result
 
         size_mb = output_path.stat().st_size / (1024 * 1024)
@@ -186,12 +207,13 @@ def generate_video(
         if str(project_output) != str(output_path):
             try:
                 shutil.copy2(str(output_mp4), str(project_output))
-            except Exception:
-                pass  # 二次复制失败不影响主结果
+            except Exception as e:
+                warn(f"二次复制到项目目录失败: {e}")
 
         result["video_path"] = str(output_path)
         result["success"] = True
     else:
         error("未找到渲染输出的 MP4 文件")
 
+    _cleanup()
     return result

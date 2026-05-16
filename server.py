@@ -20,7 +20,7 @@ from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 
 from pipeline import generate_video
-from pipeline.utils import sanitize_filename, check_disk_space
+from pipeline.utils import sanitize_filename, check_disk_space, remove_project_dir
 
 # ── 配置 ───────────────────────────────────────────────────────────
 BASE_DIR = Path(__file__).parent
@@ -33,6 +33,7 @@ MAX_CONCURRENT = int(os.environ.get("MAX_CONCURRENT", "2"))
 WORKER_SLEEP = int(os.environ.get("WORKER_SLEEP", "2"))
 ORPHAN_TIMEOUT = int(os.environ.get("ORPHAN_TIMEOUT", "300"))
 MAX_FILE_SIZE_MB = int(os.environ.get("MAX_FILE_SIZE_MB", "50"))
+ALLOW_ORIGINS = os.environ.get("ALLOW_ORIGINS", "*").split(",")
 
 for d in (DATA_DIR, TASKS_DIR, VIDEOS_DIR, DOCS_DIR):
     d.mkdir(parents=True, exist_ok=True)
@@ -60,18 +61,10 @@ def init_db():
 def recover_orphaned_tasks():
     """启动时恢复：将上次服务中断时残留在 processing 状态的任务重置为 pending。"""
     conn = sqlite3.connect(str(DB_PATH))
-    now = time.time()
-    cutoff = now - ORPHAN_TIMEOUT
     count = conn.execute(
         "UPDATE tasks SET status='pending', progress='已恢复（服务重启）', updated_at=? "
-        "WHERE status='processing' AND updated_at < ?",
-        (now, cutoff),
-    ).rowcount
-    # 如果服务刚启动，所有 processing 都是孤儿（不受超时限制）
-    count += conn.execute(
-        "UPDATE tasks SET status='pending', progress='已恢复（服务重启）', updated_at=? "
-        "WHERE status='processing' AND updated_at >= ?",
-        (now, cutoff),
+        "WHERE status='processing'",
+        (time.time(),),
     ).rowcount
     conn.commit()
     conn.close()
@@ -114,11 +107,12 @@ def db_create_task(task_id: str, filename: str):
 # ── Worker ─────────────────────────────────────────────────────────
 _running_tasks: set[str] = set()
 _lock = threading.Lock()
+_shutdown_event = threading.Event()
 
 
 def worker_loop():
     """后台线程：轮询 pending 任务，逐个执行"""
-    while True:
+    while not _shutdown_event.is_set():
         try:
             conn = sqlite3.connect(str(DB_PATH))
             conn.row_factory = sqlite3.Row
@@ -143,7 +137,8 @@ def worker_loop():
         except Exception as e:
             print(f"[worker] error: {e}")
 
-        time.sleep(WORKER_SLEEP)
+        # 等待下次轮询或被 shutdown 信号中断
+        _shutdown_event.wait(timeout=WORKER_SLEEP)
 
 
 def run_task(task_id: str):
@@ -176,11 +171,16 @@ def run_task(task_id: str):
 
         if result["success"] and result["video_path"]:
             video_dst = VIDEOS_DIR / f"{task_id}.mp4"
-            shutil.copy2(result["video_path"], str(video_dst))
+            try:
+                shutil.copy2(result["video_path"], str(video_dst))
+                video_path = str(video_dst)
+            except Exception as e:
+                print(f"[server] 复制视频到存储目录失败: {e}")
+                video_path = result["video_path"]  # 降级使用原始路径
             db_update_task(
                 task_id,
                 status="completed",
-                video_path=str(video_dst),
+                video_path=video_path,
                 progress="完成",
                 updated_at=time.time(),
             )
@@ -201,6 +201,9 @@ def run_task(task_id: str):
             updated_at=time.time(),
         )
     finally:
+        # 删除临时项目目录（含 index.html / narration.wav 等）
+        task_project = str(TASKS_DIR / f"task-{task_id}")
+        remove_project_dir(task_project)
         with _lock:
             _running_tasks.discard(task_id)
 
@@ -211,12 +214,21 @@ async def lifespan(app: FastAPI):
     t = threading.Thread(target=worker_loop, daemon=True)
     t.start()
     yield
+    # ── 优雅关闭 ──
+    print("[server] 正在停止 worker...")
+    _shutdown_event.set()
+    t.join(timeout=10)
+    wait_until = time.time() + 30
+    while _running_tasks and time.time() < wait_until:
+        time.sleep(1)
+    if _running_tasks:
+        print(f"[server] 等待超时，{len(_running_tasks)} 个任务仍在运行")
 
 
 app = FastAPI(title="文档→视频生成服务", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=ALLOW_ORIGINS,
     allow_methods=["*"],
     allow_headers=["*"],
 )

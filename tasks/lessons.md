@@ -1,5 +1,25 @@
 # 经验教训
 
+## 2026-05-16: 全面修复 — 默认project/优雅关闭/fallback/CORS/孤儿任务等7项
+
+### 发现问题清单
+1. `auto_pipeline.py --project` 默认 `zoo-safety`，不指定时覆盖同一目录
+2. `server.py` 无优雅关闭，重启时任务中断
+3. `_fallback_durations` 极端场景 speech_dur 负数
+4. `pipeline.py` 二次复制失败静默忽略
+5. `server.py` shutil.copy2 在外层 try 里，复制失败误标任务 failed
+6. CORS `allow_origins=["*"]` 无配置入口
+7. `recover_orphaned_tasks` 两个 SQL 全覆盖，冗余
+
+### 修复要点
+- issue 1: `default="zoo-safety"` → `default=None`，pipeline 已支持 project=None 自动用文件名
+- issue 2: 新增 `_shutdown_event`，worker 循环用 `event.wait()` 替代 `time.sleep()`，lifespan shutdown 时 signal + join + 等待运行中任务（30s 超时）
+- issue 3: `speech_dur = max(audio_dur - pause * n_scenes, audio_dur * 0.5)`，去掉两层 if/else
+- issue 4: `except: pass` → `except Exception as e: warn(f"二次复制失败: {e}")`
+- issue 5: copy2 包独立 try/except，失败时降级使用原始视频路径，不标记任务 failed
+- issue 6: `ALLOW_ORIGINS = os.environ.get("ALLOW_ORIGINS", "*").split(",")`，支持用逗号分隔多个来源
+- issue 7: 两个 SQL 合并为无条件 `WHERE status='processing'`
+
 ## 2026-05-16: adjust_timing fallback 路径所有场景 data-start=0 修复
 
 ### 问题

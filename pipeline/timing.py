@@ -273,8 +273,7 @@ def align_scenes_by_text(
 def _fallback_durations(audio_dur, n_scenes, chars_per_scene, has_title_scene, pause):
     """字数比例分配降级方案"""
     speech_dur = audio_dur - pause * n_scenes
-    if speech_dur <= 0:
-        speech_dur = audio_dur * 0.85
+    speech_dur = max(speech_dur, audio_dur * 0.5)  # 保底：纯说话时间不低于总时长 50%
     total_chars = sum(chars_per_scene) or 1
 
     durations = []
@@ -473,6 +472,37 @@ def adjust_timing(project_dir):
             return prefix + f"{new_pos:.1f}"
 
         html = re.sub(pat, shift_gsap, html)
+
+    # 确保退出动画在 TTS 音频结束后触发
+    if aligned is not None:
+        for i in range(n_scenes):
+            if has_title_scene and i == 0:
+                continue
+            if i >= len(aligned):
+                continue
+            tts_end = aligned[i][1]
+
+            sid = f"#scene{i+1}"
+            pat = (
+                r"(tl\.to\s*\(\s*['\"]"
+                + re.escape(sid)
+                + r"['\"]\s*,\s*\{[^}]*?duration\s*:\s*([\d.]+)[^}]*?\}\s*,\s*)[\d.]+"
+            )
+
+            old_html = html
+
+            def _push_exit(m, te=tts_end):
+                prefix = m.group(1)
+                fade_dur = float(m.group(2))
+                old_pos = float(m.group(0)[len(prefix):])
+                min_pos = te - fade_dur + 0.3
+                new_pos = max(old_pos, min_pos)
+                return prefix + f"{new_pos:.1f}"
+
+            html = re.sub(pat, _push_exit, html)
+
+            if html != old_html:
+                info(f"  场景{i+1} 退出动画已推迟到 TTS 结束后 ({tts_end:.1f}s)")
 
     for i in range(1, n_scenes + 1):
         sid = f"scene{i}"
