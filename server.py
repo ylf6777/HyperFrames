@@ -6,16 +6,20 @@ FastAPI + SQLite + 后台 Worker
 启动:  uvicorn server:app --host 0.0.0.0 --port 8000
 """
 
-import os, sys, json, time, uuid, threading, sqlite3, shutil
+import os
+import json
+import time
+import uuid
+import threading
+import sqlite3
+import shutil
 from pathlib import Path
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, UploadFile, File, HTTPException
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 
-# 确保能找到同目录的 auto_pipeline
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from auto_pipeline import generate_video
+from pipeline import generate_video
 
 # ── 配置 ───────────────────────────────────────────────────────────
 BASE_DIR = Path(__file__).parent
@@ -26,6 +30,7 @@ DOCS_DIR = DATA_DIR / "docs"
 DB_PATH = DATA_DIR / "tasks.db"
 MAX_CONCURRENT = 2       # 同时最多渲染几个
 WORKER_SLEEP = 2         # 每次轮询间隔（秒）
+ORPHAN_TIMEOUT = 300     # 孤儿任务超时（秒）
 
 for d in (DATA_DIR, TASKS_DIR, VIDEOS_DIR, DOCS_DIR):
     d.mkdir(parents=True, exist_ok=True)
@@ -49,7 +54,31 @@ def init_db():
     conn.commit()
     conn.close()
 
+
+def recover_orphaned_tasks():
+    """启动时恢复：将上次服务中断时残留在 processing 状态的任务重置为 pending。"""
+    conn = sqlite3.connect(str(DB_PATH))
+    now = time.time()
+    cutoff = now - ORPHAN_TIMEOUT
+    count = conn.execute(
+        "UPDATE tasks SET status='pending', progress='已恢复（服务重启）', updated_at=? "
+        "WHERE status='processing' AND updated_at < ?",
+        (now, cutoff),
+    ).rowcount
+    # 如果服务刚启动，所有 processing 都是孤儿（不受超时限制）
+    count += conn.execute(
+        "UPDATE tasks SET status='pending', progress='已恢复（服务重启）', updated_at=? "
+        "WHERE status='processing' AND updated_at >= ?",
+        (now, cutoff),
+    ).rowcount
+    conn.commit()
+    conn.close()
+    if count:
+        print(f"[server] 启动恢复: 重置了 {count} 个孤儿任务")
+
+
 init_db()
+recover_orphaned_tasks()
 
 
 def db_get_task(task_id: str) -> dict | None:
@@ -122,17 +151,21 @@ def run_task(task_id: str):
         return
 
     doc_path = str(DOCS_DIR / f"{task_id}_{task['filename']}")
-    db_update_task(task_id, status="processing", progress="读取文档中...")
+
+    def on_progress(msg: str):
+        db_update_task(task_id, progress=msg, updated_at=time.time())
+
+    on_progress("读取文档中...")
 
     try:
         result = generate_video(
             input_path=doc_path,
             project=f"task-{task_id}",
             base_dir=str(TASKS_DIR),
+            on_progress=on_progress,
         )
 
         if result["success"] and result["video_path"]:
-            # 复制视频到 videos 目录
             video_dst = VIDEOS_DIR / f"{task_id}.mp4"
             shutil.copy2(result["video_path"], str(video_dst))
             db_update_task(
@@ -146,7 +179,7 @@ def run_task(task_id: str):
             db_update_task(
                 task_id,
                 status="failed",
-                error="生成失败，请检查日志",
+                error="生成失败，详情请查看服务端日志",
                 progress="失败",
                 updated_at=time.time(),
             )
@@ -169,6 +202,7 @@ async def lifespan(app: FastAPI):
     t = threading.Thread(target=worker_loop, daemon=True)
     t.start()
     yield
+
 
 app = FastAPI(title="文档→视频生成服务", lifespan=lifespan)
 app.add_middleware(
@@ -194,12 +228,15 @@ async def create_task(file: UploadFile = File(...)):
     if ext not in (".doc", ".docx", ".txt", ".pdf"):
         raise HTTPException(400, f"不支持的文件格式: {ext}")
 
+    # 限制文件大小（50MB）
+    content = await file.read()
+    if len(content) > 50 * 1024 * 1024:
+        raise HTTPException(400, "文件大小超过 50MB 限制")
+
     task_id = uuid.uuid4().hex[:12]
     db_create_task(task_id, file.filename)
 
-    # 保存文档
     doc_path = DOCS_DIR / f"{task_id}_{file.filename}"
-    content = await file.read()
     doc_path.write_bytes(content)
 
     return {"task_id": task_id, "status": "pending"}
@@ -247,7 +284,8 @@ def list_tasks(limit: int = 20):
     conn.row_factory = sqlite3.Row
     rows = conn.execute(
         "SELECT id, status, filename, progress, error, created_at, updated_at "
-        "FROM tasks ORDER BY created_at DESC LIMIT ?", (limit,)
+        "FROM tasks ORDER BY created_at DESC LIMIT ?",
+        (limit,),
     ).fetchall()
     conn.close()
     return [dict(r) for r in rows]
@@ -255,4 +293,5 @@ def list_tasks(limit: int = 20):
 
 if __name__ == "__main__":
     import uvicorn
+
     uvicorn.run(app, host="0.0.0.0", port=8000)

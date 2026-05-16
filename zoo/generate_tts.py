@@ -4,7 +4,7 @@ import edge_tts
 import json
 
 VOICE = 'zh-CN-XiaoyiNeural'
-RATE = '+15%'
+RATE = '-25%'
 
 async def main():
     with open('script.txt', 'r', encoding='utf-8') as f:

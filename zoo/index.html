@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>动物园安全</title>
+<script src="https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js"></script>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: "Microsoft YaHei", "PingFang SC", sans-serif; background: #FFF8E7; overflow: hidden; }
+  #root { position: relative; width: 1920px; height: 1080px; overflow: hidden; }
+  .scene {
+    position: absolute; inset: 0;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    opacity: 1; color: #3D2E1E; text-align: center; padding: 80px;
+  }
+  .emoji-main { font-size: 320px; line-height: 1; margin-bottom: 40px; filter: drop-shadow(0 10px 20px rgba(0,0,0,0.15)); }
+  .title { font-size: 130px; font-weight: 900; color: #FF6B6B; margin-bottom: 30px; text-shadow: 4px 4px 0 #FFF; }
+  .subtitle { font-size: 64px; font-weight: 700; color: #4ECDC4; }
+  .content { font-size: 72px; font-weight: 700; line-height: 1.5; max-width: 1500px; color: #3D2E1E; }
+  .scene-s1 { background: radial-gradient(circle at 50% 40%, #FFE5A8, #FFF8E7); }
+  .scene-s2 { background: radial-gradient(circle at 50% 40%, #FFD3D3, #FFF8E7); }
+  .scene-s3 { background: radial-gradient(circle at 50% 40%, #C8F0E8, #FFF8E7); }
+  .scene-s4 { background: radial-gradient(circle at 50% 40%, #FFE0B5, #FFF8E7); }
+  .scene-s5 { background: radial-gradient(circle at 50% 40%, #D4E8FF, #FFF8E7); }
+  .scene-s6 { background: radial-gradient(circle at 50% 40%, #FFD3D3, #FFF8E7); }
+  .scene-s7 { background: radial-gradient(circle at 50% 40%, #FFE5A8, #FFF8E7); }
+</style>
+</head>
+<body>
+<div id="root" data-composition-id="main" data-start="0" data-duration="36" data-width="1920" data-height="1080">
+
+  <div id="scene1" class="scene scene-s1 clip" data-start="0.1" data-duration="5.0" data-track-index="1">
+    <div class="emoji-main">🦁🐯</div>
+    <div class="title">动物园安全</div>
+    <div class="subtitle">小朋友，跟我一起去看看吧！</div>
+  </div>
+
+  <div id="scene2" class="scene scene-s2 clip" data-start="4.5" data-duration="5.2" data-track-index="2">
+    <div class="emoji-main">🦒</div>
+    <div class="content">站在护栏外面看<br>不能翻，也不能钻进去！</div>
+  </div>
+
+  <div id="scene3" class="scene scene-s3 clip" data-start="9.1" data-duration="5.0" data-track-index="3">
+    <div class="emoji-main">🍎🚫</div>
+    <div class="content">不可以随便喂小动物<br>它们会肚子疼哦！</div>
+  </div>
+
+  <div id="scene4" class="scene scene-s4 clip" data-start="13.5" data-duration="5.8" data-track-index="4">
+    <div class="emoji-main">🦓🐘</div>
+    <div class="content">神奇的野生动物园<br>动物会在身边走来走去！</div>
+  </div>
+
+  <div id="scene5" class="scene scene-s5 clip" data-start="18.7" data-duration="4.8" data-track-index="5">
+    <div class="emoji-main">🚙</div>
+    <div class="content">坐在游览车里<br>车窗要关得紧紧的！</div>
+  </div>
+
+  <div id="scene6" class="scene scene-s6 clip" data-start="22.9" data-duration="5.9" data-track-index="6">
+    <div class="emoji-main">🤫</div>
+    <div class="content">不要敲窗户，不要大声叫<br>不然老虎会生气！</div>
+  </div>
+
+  <div id="scene7" class="scene scene-s7 clip" data-start="28.2" data-duration="7.3" data-track-index="7">
+    <div class="emoji-main">🐰💕</div>
+    <div class="content">轻轻的、温柔的<br>做个安全的好宝宝！</div>
+  </div>
+
+  <audio id="narration" data-start="0" data-duration="36" data-track-index="0" src="narration.wav" data-volume="1"></audio>
+</div>
+
+<script>
+window.__timelines = window.__timelines || {};
+const tl = gsap.timeline({ paused: true });
+
+tl.from('#scene1 .emoji-main', { opacity: 0, scale: 0.5, y: -60, duration: 0.6, ease: "back.out(1.7)" }, 0.4);
+tl.from('#scene1 .title',      { opacity: 0, y: 40, duration: 0.5, ease: "power3.out" }, 0.9);
+tl.from('#scene1 .subtitle',   { opacity: 0, y: 30, duration: 0.5, ease: "power2.out" }, 1.4);
+
+tl.from('#scene2 .emoji-main', { opacity: 0, scale: 0, rotation: -20, duration: 0.5, ease: "back.out(1.7)" }, 4.8);
+tl.from('#scene2 .content',    { opacity: 0, y: 40, duration: 0.5, ease: "power3.out" }, 5.3);
+
+tl.from('#scene3 .emoji-main', { opacity: 0, scale: 0, rotation: -20, duration: 0.5, ease: "back.out(1.7)" }, 9.4);
+tl.from('#scene3 .content',    { opacity: 0, y: 40, duration: 0.5, ease: "power3.out" }, 9.9);
+
+tl.from('#scene4 .emoji-main', { opacity: 0, scale: 0, rotation: -20, duration: 0.5, ease: "back.out(1.7)" }, 13.8);
+tl.from('#scene4 .content',    { opacity: 0, y: 40, duration: 0.5, ease: "power3.out" }, 14.3);
+
+tl.from('#scene5 .emoji-main', { opacity: 0, scale: 0, x: -80, duration: 0.5, ease: "back.out(1.7)" }, 19.0);
+tl.from('#scene5 .content',    { opacity: 0, y: 40, duration: 0.5, ease: "power3.out" }, 19.5);
+
+tl.from('#scene6 .emoji-main', { opacity: 0, scale: 0, duration: 0.5, ease: "back.out(1.7)" }, 23.2);
+tl.from('#scene6 .content',    { opacity: 0, y: 40, duration: 0.5, ease: "power3.out" }, 23.7);
+
+tl.from('#scene7 .emoji-main', { opacity: 0, scale: 0, duration: 0.5, ease: "back.out(1.7)" }, 28.6);
+tl.from('#scene7 .content',    { opacity: 0, y: 40, duration: 0.5, ease: "power3.out" }, 29.1);
+
+tl.to('#scene7', { opacity: 0, duration: 1.2, ease: "power2.inOut" }, 35.0);
+
+window.__timelines["main"] = tl;
+</script>
+</body>
+</html>
