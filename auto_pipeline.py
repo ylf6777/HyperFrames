@@ -5,9 +5,9 @@ auto_pipeline.py — CLI 入口：全自动文档到视频生成管线
 流程: 文档 → Claude AI 生成 composition → TTS 配音 → HyperFrames 渲染 → MP4
 
 使用方法:
-  1. 设置 API Key:
-     set ANTHROPIC_API_KEY=sk-xxx     (Windows)
-     export ANTHROPIC_API_KEY=sk-xxx  (Linux/Mac)
+  1. 设置环境变量:
+     export ANTHROPIC_API_KEY=sk-xxx  (API Key)
+     export ANTHROPIC_BASE_URL=...    (可选，自定义 API 地址)
 
   2. 运行:
      python auto_pipeline.py 文档.docx --project my-video --output 我的视频.mp4
@@ -34,14 +34,15 @@ def main():
   python auto_pipeline.py 教案.docx
   python auto_pipeline.py 教案.docx --project zoo-safety --output 我的视频.mp4
   python auto_pipeline.py 教案.txt --skip-llm   (仅执行 TTS + 渲染)
-  python auto_pipeline.py 教案.docx --api-key sk-xxx
+
+API Key 请通过环境变量设置:
+  export ANTHROPIC_API_KEY=sk-xxx
+  export ANTHROPIC_BASE_URL=https://... (可选)
         """,
     )
     parser.add_argument("input", help="输入文档路径 (.docx / .doc / .txt / .pdf)")
     parser.add_argument("--project", "-p", default=None, help="项目目录名 (默认: 输入文件名)")
     parser.add_argument("--output", "-o", default=None, help="输出视频文件名 (默认自动生成)")
-    parser.add_argument("--api-key", "-k", default=None, help="API Key (默认用 ANTHROPIC_API_KEY 环境变量)")
-    parser.add_argument("--api-base", default=None, help="API Base URL (默认用 ANTHROPIC_BASE_URL 环境变量或官方地址)")
     parser.add_argument("--model", default=None, help="模型名 (默认: claude-sonnet-4-6)")
     parser.add_argument("--base-dir", "-d", default=None, help="项目根目录 (默认当前目录)")
     parser.add_argument("--skip-llm", action="store_true", help="跳过 LLM 内容生成，直接跑 TTS+渲染")
@@ -52,8 +53,6 @@ def main():
     result = generate_video(
         input_path=args.input,
         project=args.project,
-        api_key=args.api_key,
-        api_base=args.api_base,
         model=args.model,
         base_dir=args.base_dir,
         output=args.output,
