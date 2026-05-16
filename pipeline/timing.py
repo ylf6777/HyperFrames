@@ -38,10 +38,7 @@ def load_sentence_timestamps(project_dir: str) -> list[dict] | None:
 
 
 def _extract_scene_texts(html: str, n_scenes: int) -> list[str]:
-    """提取每个场景内的纯文本（去标签、去空白），支持多种容器类型"""
-    # 匹配 content / rule-item / step-item / tag 等文本容器
-    container_pat = r'<div[^>]*?class="(?:[^"]*\s)?(?:(?:content|rule-item|step-item|tag|title|subtitle)(?=\s|"))[^"]*"[^>]*?>'
-
+    """提取每个场景内的所有可见文字（不限元素类型和 class 名）"""
     texts = []
     for i in range(1, n_scenes + 1):
         m = re.search(rf'<div[^>]*?id="scene{i}"[^>]*?>', html)
@@ -51,7 +48,6 @@ def _extract_scene_texts(html: str, n_scenes: int) -> list[str]:
         start_pos = m.end()
         depth = 1
         pos = start_pos
-        scene_html = ""
         while depth > 0:
             no = html.find("<div", pos)
             nc = html.find("</div>", pos)
@@ -65,34 +61,13 @@ def _extract_scene_texts(html: str, n_scenes: int) -> list[str]:
                 pos = nc + 6
                 if depth == 0:
                     scene_html = html[start_pos:nc]
+                    # 去掉标签，不同元素间的文字用逗号隔开（产生自然停顿）
+                    text = re.sub(r'<[^>]+>', '，', scene_html)
+                    text = re.sub(r'，+', '，', text)  # 合并连续逗号
+                    text = re.sub(r'\s+', '', text)    # 先清空白
+                    text = text.strip('，')            # 再去首尾逗号
+                    texts.append(text)
                     break
-
-        content_parts = []
-        for cm in re.finditer(container_pat, scene_html):
-            c_start = cm.end()
-            c_depth = 1
-            c_pos = c_start
-            while c_depth > 0:
-                co = scene_html.find("<div", c_pos)
-                cc = scene_html.find("</div>", c_pos)
-                if cc < 0:
-                    break
-                if co >= 0 and co < cc:
-                    c_depth += 1
-                    c_pos = co + 4
-                else:
-                    c_depth -= 1
-                    c_pos = cc + 6
-                    if c_depth == 0:
-                        inner = scene_html[c_start:cc]
-                        inner_text = re.sub(r'<[^>]+>', '', inner)
-                        inner_text = re.sub(r'\s+', '', inner_text)
-                        if inner_text:
-                            content_parts.append(inner_text)
-                        break
-
-        texts.append("".join(content_parts))
-
     return texts
 
 
@@ -300,6 +275,33 @@ def write_project_files(project_dir, script_content, html_content):
     info(f"已写入: {html_path} ({len(html_content)} 字符)")
 
 
+def _clean_tts_text(text: str) -> str:
+    """清理文本，仅保留可朗读的文字（去符号、去图形/emoji）"""
+    # 破折号 → 逗号（TTS 可能读"破折号"）
+    text = re.sub(r'[—–]+', '，', text)
+    # 省略号 → 句号
+    text = re.sub(r'[……]+', '。', text)
+    # 冒号/分号 → 逗号
+    text = text.replace('：', '，').replace('；', '，')
+    # 移除 TTS 会出声朗读的符号（书名号、引号、括号）
+    text = re.sub(r'[「」『』""《》<>（）()]', '', text)
+    # 移除 emoji / 图形字符
+    text = re.sub(
+        '[\U0001F300-\U0001F9FF'        # Misc symbols + emoji (U+1F300-1F9FF)
+        '\U0001FA00-\U0001FA6F'         # Chess symbols (U+1FA00-1FA6F)
+        '\U0001FA70-\U0001FAFF'         # Symbols Extended-A (U+1FA70-1FAFF)
+        '☀-➿'                 # Misc symbols + dingbats (U+2600-27BF)
+        '︀-️'                 # Variation selectors
+        ']', '', text)
+    # 移除多余空白
+    text = re.sub(r'\s+', '', text)
+    # 去掉句尾标点后的多余逗号（eg. "。，吃饭" → "。吃饭"）
+    text = re.sub(r'([。！？])，', r'\1', text)
+    # 合并 emoji/符号删除后产生的连续逗号
+    text = re.sub(r'，+', '，', text)
+    return text.strip('，')
+
+
 def sync_script_from_html(project_dir: str) -> bool:
     """从 HTML 场景中提取显示文本，覆盖写入 script.txt（旁白只读画面上的字）"""
     html_path = Path(project_dir) / "index.html"
@@ -315,8 +317,16 @@ def sync_script_from_html(project_dir: str) -> bool:
         return False
 
     texts = _extract_scene_texts(html_content, n_scenes)
-    # 过滤空场景（纯标题无旁白），保留非空场景文本
-    paragraphs = [t for t in texts if t.strip()]
+
+    # 过滤空场景，清理符号
+    paragraphs = []
+    for i, t in enumerate(texts):
+        if not t.strip():
+            continue
+        cleaned = _clean_tts_text(t)
+        if cleaned:
+            paragraphs.append(cleaned)
+
     if not paragraphs:
         warn("所有场景均为空文本，跳过同步")
         return False
@@ -411,6 +421,16 @@ def adjust_timing(project_dir):
         scene_durations[-1] = round(scene_durations[-1] + diff, 1)
         if scene_durations[-1] < 1.5:
             scene_durations[-1] = 1.5
+
+    # 文本对齐模式下，填补场景间的间隙（丢失的 TTS 句子）
+    if aligned is not None:
+        for i in range(n_scenes - 1):
+            _, curr_end = aligned[i]
+            next_start, _ = aligned[i + 1]
+            gap = next_start - (curr_end + pause)
+            if gap > 0.3:
+                scene_durations[i] = round(scene_durations[i] + gap, 1)
+                info(f"  场景{i+1} 延长 {gap:.1f}s 填补至下一场景的间隙")
 
     info(f"音频: {audio_dur:.1f}s | 场景数: {n_scenes}")
     for i, (sd, ch) in enumerate(zip(scene_durations, chars_per_scene)):
@@ -536,6 +556,26 @@ def adjust_timing(project_dir):
             )
             info(f"  场景{i} data-duration 从 {current_dur:.1f}s 扩展到 {new_dur:.1f}s")
             scene_durations[i-1] = new_dur
+            current_dur = new_dur
+            current_end = scene_start + current_dur
+
+        # 安全网：确保 tl.to(/#sceneN 退场动画不会在 data-duration 结束前完成淡出
+        sid = f"#scene{i}"
+        pat_exit = (
+            r"(tl\.to\s*\(\s*['\"]"
+            + re.escape(sid)
+            + r"['\"]\s*,\s*\{[^}]*?duration\s*:\s*([\d.]+)[^}]*?\}\s*,\s*)[\d.]+"
+        )
+        def _late_exit(m, se=current_end):
+            prefix = m.group(1)
+            fade_dur = float(m.group(2))
+            old_pos = float(m.group(0)[len(prefix):])
+            min_pos = max(old_pos, se - fade_dur - 0.2)  # 退场结束 ≈ data-duration 边界
+            return prefix + f"{min_pos:.1f}"
+        new_html = re.sub(pat_exit, _late_exit, html)
+        if new_html != html:
+            info(f"  场景{i} 退场动画推后至 data-duration 边界 ({current_end:.1f}s)")
+        html = new_html
 
     # 计算实际结束时间：取所有场景 data-start + data-duration 的最大值
     scene_ends = []

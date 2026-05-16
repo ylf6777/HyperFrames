@@ -98,10 +98,10 @@ def generate_video(
         step(2, total_steps, "AI 生成视频内容")
         _api_key = api_key or os.environ.get("ANTHROPIC_API_KEY")
         _api_base = api_base or os.environ.get("ANTHROPIC_BASE_URL")
-        _model = model or os.environ.get("ANTHROPIC_MODEL") or "claude-sonnet-4-6"
+        _model = model or os.environ.get("HF_MODEL") or "claude-sonnet-4-6"
 
         if not _api_key:
-            error("需要 API Key！可通过 ANTHROPIC_API_KEY 环境变量或 --api-key 参数设置")
+            error("需要 API Key！请设置 ANTHROPIC_API_KEY 环境变量")
             _cleanup()
             return result
 

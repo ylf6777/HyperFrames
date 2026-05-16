@@ -15,7 +15,7 @@ import sqlite3
 import shutil
 from pathlib import Path
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, UploadFile, File, HTTPException
+from fastapi import FastAPI, UploadFile, File, HTTPException, Request
 from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -34,9 +34,53 @@ WORKER_SLEEP = int(os.environ.get("WORKER_SLEEP", "2"))
 ORPHAN_TIMEOUT = int(os.environ.get("ORPHAN_TIMEOUT", "300"))
 MAX_FILE_SIZE_MB = int(os.environ.get("MAX_FILE_SIZE_MB", "50"))
 ALLOW_ORIGINS = os.environ.get("ALLOW_ORIGINS", "*").split(",")
+# ── 速率限制配置 ──
+RATE_LIMIT_REQUESTS = int(os.environ.get("RATE_LIMIT_REQUESTS", "1"))
+RATE_LIMIT_WINDOW = int(os.environ.get("RATE_LIMIT_WINDOW", "60"))
+MAX_TASKS_PER_IP_PENDING = int(os.environ.get("MAX_TASKS_PER_IP_PENDING", "2"))
+MAX_TASKS_PER_IP_TOTAL = int(os.environ.get("MAX_TASKS_PER_IP_TOTAL", "10"))
+MAX_TASKS_GLOBAL = int(os.environ.get("MAX_TASKS_GLOBAL", "100"))
 
 for d in (DATA_DIR, TASKS_DIR, VIDEOS_DIR, DOCS_DIR):
     d.mkdir(parents=True, exist_ok=True)
+
+
+# ── Rate Limiter ────────────────────────────────────────────────────
+from collections import defaultdict as _defaultdict
+
+
+class RateLimiter:
+    """滑动窗口 IP 速率限制器"""
+    def __init__(self, max_requests: int, window: float):
+        self.max_requests = max_requests
+        self.window = window
+        self._ips: dict[str, list[float]] = _defaultdict(list)
+
+    def allow(self, ip: str) -> bool:
+        now = time.time()
+        cutoff = now - self.window
+        self._ips[ip] = [t for t in self._ips[ip] if t > cutoff]
+        if len(self._ips[ip]) >= self.max_requests:
+            return False
+        self._ips[ip].append(now)
+        return True
+
+    def remaining(self, ip: str) -> int:
+        cutoff = time.time() - self.window
+        active = sum(1 for t in self._ips[ip] if t > cutoff)
+        return max(0, self.max_requests - active)
+
+
+_post_limiter = RateLimiter(RATE_LIMIT_REQUESTS, RATE_LIMIT_WINDOW)
+
+
+def get_client_ip(request: Request) -> str:
+    forwarded = request.headers.get("X-Forwarded-For", "")
+    if forwarded:
+        return forwarded.split(",")[0].strip()
+    if request.client:
+        return request.client.host or "unknown"
+    return "unknown"
 
 
 # ── 数据库 ─────────────────────────────────────────────────────────
@@ -54,6 +98,11 @@ def init_db():
             updated_at  REAL
         )
     """)
+    # 迁移：为速率限制添加 client_ip 列
+    try:
+        conn.execute("ALTER TABLE tasks ADD COLUMN client_ip TEXT DEFAULT ''")
+    except sqlite3.OperationalError:
+        pass  # 列已存在
     conn.commit()
     conn.close()
 
@@ -93,12 +142,12 @@ def db_update_task(task_id: str, **kw):
     conn.close()
 
 
-def db_create_task(task_id: str, filename: str):
+def db_create_task(task_id: str, filename: str, client_ip: str = ""):
     now = time.time()
     conn = sqlite3.connect(str(DB_PATH))
     conn.execute(
-        "INSERT INTO tasks (id, status, filename, created_at, updated_at) VALUES (?,?,?,?,?)",
-        (task_id, "pending", filename, now, now),
+        "INSERT INTO tasks (id, status, filename, client_ip, created_at, updated_at) VALUES (?,?,?,?,?,?)",
+        (task_id, "pending", filename, client_ip, now, now),
     )
     conn.commit()
     conn.close()
@@ -240,7 +289,7 @@ def health():
 
 
 @app.post("/api/tasks")
-async def create_task(file: UploadFile = File(...)):
+async def create_task(file: UploadFile = File(...), request: Request = None):
     """上传文档，创建生成任务"""
     if not file.filename:
         raise HTTPException(400, "文件名不能为空")
@@ -254,9 +303,56 @@ async def create_task(file: UploadFile = File(...)):
     if len(content) > MAX_FILE_SIZE_MB * 1024 * 1024:
         raise HTTPException(400, f"文件大小超过 {MAX_FILE_SIZE_MB}MB 限制")
 
+    # ── 速率限制检查 ──
+    client_ip = get_client_ip(request)
+
+    # 1) IP 速率限制：每分钟 N 次
+    if not _post_limiter.allow(client_ip):
+        remaining_sec = RATE_LIMIT_WINDOW
+        raise HTTPException(
+            429,
+            f"请求过于频繁，请等待 {remaining_sec} 秒后再试（每 IP 每分钟 {RATE_LIMIT_REQUESTS} 次）",
+        )
+
+    conn = sqlite3.connect(str(DB_PATH))
+    try:
+        # 2) 同 IP 排队上限：pending+processing 最多 N 个
+        pending_count = conn.execute(
+            "SELECT COUNT(*) FROM tasks WHERE client_ip=? AND status IN ('pending','processing')",
+            (client_ip,),
+        ).fetchone()[0]
+        if pending_count >= MAX_TASKS_PER_IP_PENDING:
+            raise HTTPException(
+                429,
+                f"同 IP 待处理任务过多（{pending_count} ≥ {MAX_TASKS_PER_IP_PENDING}），请等待当前任务完成",
+            )
+
+        # 3) 同 IP 总任务上限
+        total_ip = conn.execute(
+            "SELECT COUNT(*) FROM tasks WHERE client_ip=?",
+            (client_ip,),
+        ).fetchone()[0]
+        if total_ip >= MAX_TASKS_PER_IP_TOTAL:
+            raise HTTPException(
+                429,
+                f"同 IP 总任务数已达上限（{total_ip} ≥ {MAX_TASKS_PER_IP_TOTAL}）",
+            )
+
+        # 4) 全局总任务上限
+        total_global = conn.execute(
+            "SELECT COUNT(*) FROM tasks"
+        ).fetchone()[0]
+        if total_global >= MAX_TASKS_GLOBAL:
+            raise HTTPException(
+                429,
+                f"系统任务总量已达上限（{total_global} ≥ {MAX_TASKS_GLOBAL}）",
+            )
+    finally:
+        conn.close()
+
     task_id = uuid.uuid4().hex[:12]
     safe_name = sanitize_filename(file.filename)
-    db_create_task(task_id, safe_name)
+    db_create_task(task_id, safe_name, client_ip)
 
     doc_path = (DOCS_DIR / f"{task_id}_{safe_name}").resolve()
     # 验证最终路径仍在 DOCS_DIR 内（防御路径穿越）

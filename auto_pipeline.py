@@ -43,7 +43,7 @@ API Key 请通过环境变量设置:
     parser.add_argument("input", help="输入文档路径 (.docx / .doc / .txt / .pdf)")
     parser.add_argument("--project", "-p", default=None, help="项目目录名 (默认: 输入文件名)")
     parser.add_argument("--output", "-o", default=None, help="输出视频文件名 (默认自动生成)")
-    parser.add_argument("--model", default=None, help="模型名 (默认: claude-sonnet-4-6)")
+    parser.add_argument("--model", default=None, help="模型名 (默认: claude-sonnet-4-6，也可用 HF_MODEL 环境变量)")
     parser.add_argument("--base-dir", "-d", default=None, help="项目根目录 (默认当前目录)")
     parser.add_argument("--skip-llm", action="store_true", help="跳过 LLM 内容生成，直接跑 TTS+渲染")
     parser.add_argument("--dry-run", action="store_true", help="仅生成内容，不执行 TTS 和渲染")
