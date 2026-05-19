@@ -56,18 +56,24 @@ class RateLimiter:
         self.window = window
         self._ips: dict[str, list[float]] = _defaultdict(list)
 
+    def _prune(self, ip: str, cutoff: float):
+        pruned = [t for t in self._ips.get(ip, []) if t > cutoff]
+        if pruned:
+            self._ips[ip] = pruned
+        else:
+            self._ips.pop(ip, None)
+
     def allow(self, ip: str) -> bool:
         now = time.time()
-        cutoff = now - self.window
-        self._ips[ip] = [t for t in self._ips[ip] if t > cutoff]
-        if len(self._ips[ip]) >= self.max_requests:
+        self._prune(ip, now - self.window)
+        if len(self._ips.get(ip, [])) >= self.max_requests:
             return False
         self._ips[ip].append(now)
         return True
 
     def remaining(self, ip: str) -> int:
-        cutoff = time.time() - self.window
-        active = sum(1 for t in self._ips[ip] if t > cutoff)
+        self._prune(ip, time.time() - self.window)
+        active = len(self._ips.get(ip, []))
         return max(0, self.max_requests - active)
 
 

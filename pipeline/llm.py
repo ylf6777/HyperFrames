@@ -137,9 +137,12 @@ _DEFAULT_CACHE_DIR = os.environ.get("LLM_CACHE_DIR") or str(
 class LLMCache:
     """LLM 响应缓存：内容 hash + 模型名 + 提示词版本 → 7 天自动淘汰"""
 
+    _EVICT_EVERY_N = 20  # 每 N 次 put 触发一次全量淘汰扫描
+
     def __init__(self, cache_dir: str = _DEFAULT_CACHE_DIR):
         self.cache_dir = Path(cache_dir)
         self.cache_dir.mkdir(parents=True, exist_ok=True)
+        self._put_counter = 0
 
     def _make_key(self, text: str, model: str) -> str:
         text_hash = hashlib.sha256(text.encode()).hexdigest()[:16]
@@ -161,7 +164,7 @@ class LLMCache:
             return None
 
     def put(self, text: str, model: str, script: str, html: str):
-        """写入缓存，写入后触发淘汰检查"""
+        """写入缓存，写入后按概率触发淘汰检查"""
         key = self._make_key(text, model)
         now = time.time()
         data = {
@@ -176,7 +179,9 @@ class LLMCache:
         (self.cache_dir / f"{key}.json").write_text(
             json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8"
         )
-        self._evict_old()
+        self._put_counter += 1
+        if self._put_counter % self._EVICT_EVERY_N == 0:
+            self._evict_old()
 
     def _evict_old(self):
         """删除超过 TTL 天未被访问的缓存"""

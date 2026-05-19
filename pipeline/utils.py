@@ -5,6 +5,7 @@
 import os
 import shutil
 import subprocess
+import threading
 from pathlib import Path
 
 HYPERFRAMES_VERSION = os.environ.get("HYPERFRAMES_VERSION", "0.6.6")
@@ -98,6 +99,7 @@ def check_disk_space(path: str | Path, min_free_mb: int = 500) -> tuple[bool, in
 
 
 _TEMPLATE_DIR: str | None = None
+_TEMPLATE_LOCK = threading.Lock()
 
 
 def ensure_template(project_base_dir: str | Path) -> str:
@@ -133,7 +135,9 @@ def find_project_dir(project_name: str, base_dir: str | None = None) -> str:
         # 从共享模板复制 hyperframes.json（tiny, ~300B）
         global _TEMPLATE_DIR
         if _TEMPLATE_DIR is None:
-            _TEMPLATE_DIR = ensure_template(base)
+            with _TEMPLATE_LOCK:
+                if _TEMPLATE_DIR is None:
+                    _TEMPLATE_DIR = ensure_template(base)
         tmpl = Path(_TEMPLATE_DIR)
         for f in ("hyperframes.json",):
             src = tmpl / f

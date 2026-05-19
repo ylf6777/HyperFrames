@@ -35,8 +35,12 @@ def read_document(filepath: str) -> str:
         return all_text
 
     elif ext == ".txt":
-        with open(filepath, "r", encoding="utf-8") as f:
-            return f.read()
+        try:
+            with open(filepath, "r", encoding="utf-8") as f:
+                return f.read()
+        except UnicodeDecodeError:
+            with open(filepath, "r", encoding="gbk") as f:
+                return f.read()
 
     elif ext == ".pdf":
         try:
