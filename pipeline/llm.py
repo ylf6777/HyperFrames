@@ -236,6 +236,9 @@ class LLMCache:
         }
 
 
+LLM_TIMEOUT = int(os.environ.get("LLM_TIMEOUT", "180"))  # 单次 API 调用超时（秒）
+
+
 def call_claude_api(
     api_key: str,
     document_text: str,
@@ -243,6 +246,7 @@ def call_claude_api(
     api_base: str | None = None,
     model: str = "claude-sonnet-4-6",
     cache_dir: str | None = None,
+    on_progress: callable | None = None,
 ) -> Tuple[str, str]:
     """两轮 LLM 调用: 先总结文档, 再根据总结生成剧本+HTML，返回 (script, html)。
 
@@ -254,6 +258,8 @@ def call_claude_api(
     cached = cache.get(document_text, model)
     if cached:
         print(f"[llm] 缓存命中（{model}），跳过 API 调用")
+        if on_progress:
+            on_progress("缓存命中，跳过 AI 生成")
         return cached
 
     try:
@@ -261,13 +267,15 @@ def call_claude_api(
     except ImportError:
         raise ImportError("请安装 anthropic: pip install anthropic")
 
-    client_kwargs = {"api_key": api_key}
+    client_kwargs = {"api_key": api_key, "timeout": LLM_TIMEOUT}
     if api_base:
         client_kwargs["base_url"] = api_base
     client = anthropic.Anthropic(**client_kwargs)
 
     # ── 第一轮：总结文档 ──
     summary = ""
+    if on_progress:
+        on_progress("AI 正在总结文档（1/2）...")
     for attempt in range(1, max_retries + 1):
         try:
             response = client.messages.create(
@@ -284,7 +292,10 @@ def call_claude_api(
                 break
         except Exception as e:
             if attempt < max_retries:
+                msg = f"AI 总结失败，正在重试（第{attempt}次）..."
                 print(f"[llm] 总结调用失败 (第{attempt}次): {e}，正在重试...")
+                if on_progress:
+                    on_progress(msg)
                 time.sleep(2**attempt)
             else:
                 raise RuntimeError(f"总结调用失败: {e}")
@@ -293,6 +304,8 @@ def call_claude_api(
         raise RuntimeError("总结返回为空")
 
     # ── 第二轮：根据摘要生成剧本和分镜 ──
+    if on_progress:
+        on_progress("AI 正在生成视频内容（2/2）...")
     user_prompt = f"""请根据以下教案摘要，生成幼儿园安全教育视频的旁白脚本和 HTML 合成文件。
 
 教案摘要：

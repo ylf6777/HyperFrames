@@ -3,12 +3,41 @@
 """
 
 import os
+import sys
 import shutil
 import subprocess
 import threading
 from pathlib import Path
 
 HYPERFRAMES_VERSION = os.environ.get("HYPERFRAMES_VERSION", "0.6.6")
+
+# ── GBK 兼容输出 ──
+# Windows 重定向 stdout 到文件时默认用 GBK，Unicode 符号会报错
+_ENC = getattr(sys.stdout, "encoding", "") or ""
+_USE_ASCII = _ENC.upper() in ("GBK", "GB2312", "GB18030")
+
+_SYMBOLS = {
+    "info": ">" if _USE_ASCII else "▶",
+    "ok": "v" if _USE_ASCII else "✔",
+    "warn": "!" if _USE_ASCII else "⚠",
+    "err": "x" if _USE_ASCII else "✘",
+    "bar": "-" if _USE_ASCII else "─",
+}
+
+
+def _safe_print(*args, **kw):
+    """打印时捕获 UnicodeEncodeError，自动降级"""
+    try:
+        print(*args, **kw)
+    except UnicodeEncodeError:
+        # 降级：移除 ANSI 和 Unicode 符号，只打纯文本
+        plain = " ".join(str(a) for a in args)
+        import re
+        plain = re.sub(r"\033\[[0-9;]*m", "", plain)
+        try:
+            print(plain.encode("ascii", errors="replace").decode("ascii"), **kw)
+        except Exception:
+            pass  # 实在不行就放弃
 
 
 class Color:
@@ -22,24 +51,24 @@ class Color:
 
 
 def info(msg):
-    print(f"{Color.CYAN}▶{Color.RESET} {msg}")
+    _safe_print(f"{Color.CYAN}{_SYMBOLS['info']}{Color.RESET} {msg}")
 
 
 def success(msg):
-    print(f"{Color.GREEN}✔{Color.RESET} {msg}")
+    _safe_print(f"{Color.GREEN}{_SYMBOLS['ok']}{Color.RESET} {msg}")
 
 
 def warn(msg):
-    print(f"{Color.YELLOW}⚠{Color.RESET} {msg}")
+    _safe_print(f"{Color.YELLOW}{_SYMBOLS['warn']}{Color.RESET} {msg}")
 
 
 def error(msg):
-    print(f"{Color.RED}✘{Color.RESET} {msg}")
+    _safe_print(f"{Color.RED}{_SYMBOLS['err']}{Color.RESET} {msg}")
 
 
 def step(n, total, msg):
-    print(f"\n{Color.BOLD}[{n}/{total}] {msg}{Color.RESET}")
-    print(f"  {Color.DIM}{'─' * 50}{Color.RESET}")
+    _safe_print(f"\n{Color.BOLD}[{n}/{total}] {msg}{Color.RESET}")
+    _safe_print(f"  {Color.DIM}{_SYMBOLS['bar'] * 50}{Color.RESET}")
 
 
 def run_command(cmd: list[str], cwd: str | None = None, desc: str = "", timeout: int | None = None) -> bool:

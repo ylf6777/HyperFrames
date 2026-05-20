@@ -104,6 +104,7 @@ def _clean_tts_text(text: str) -> str:
         '[\U0001F300-\U0001F9FF'
         '\U0001FA00-\U0001FA6F'
         '\U0001FA70-\U0001FAFF'
+        '\U00002B00-\U00002BFF'
         '☀-➿'
         '️-️'
         ']', '', text)

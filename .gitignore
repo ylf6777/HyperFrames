@@ -1,8 +1,18 @@
 node_modules/
 renders/
 output/
+dist/
 *.mp4
 *.wav
 *.png
 *.jpg
+*.log
 .DS_Store
+__pycache__/
+_server_data/
+.agents/
+.claude/
+__hyperframes_source/
+
+# 环境变量（不要提交！）
+.env

@@ -27,6 +27,7 @@ def generate_video(
     skip_llm: bool = False,
     dry_run: bool = False,
     on_progress: callable | None = None,
+    should_cancel: callable | None = None,
 ) -> dict:
     """运行全自动文档→视频管线，返回结果字典。
 
@@ -55,13 +56,20 @@ def generate_video(
         if on_progress:
             on_progress(msg)
 
+    def _check_cancel(msg: str = "任务已被取消") -> bool:
+        if should_cancel and should_cancel():
+            warn(msg)
+            _progress(msg)
+            return True
+        return False
+
     input_path = Path(input_path)
     if not input_path.exists():
         error(f"输入文件不存在: {input_path}")
         return result
 
     project_name = project or input_path.stem.replace(" ", "_").replace("《", "").replace("》", "")
-    total_steps = 6 if not skip_llm else 5
+    total_steps = 5
 
     # ── Step 1: 读取文档 ──
     step(1, total_steps, "读取文档内容")
@@ -107,9 +115,11 @@ def generate_video(
 
         llm_cache_dir = str(Path(__file__).resolve().parent.parent / "_server_data" / "llm_cache")
         try:
-            _progress("AI 内容生成中...")
+            _progress("AI 内容生成中（等待 API 响应，可能需要 1-2 分钟）...")
             script_content, html_content = call_claude_api(
-                _api_key, document_text, api_base=_api_base, model=_model, cache_dir=llm_cache_dir)
+                _api_key, document_text, api_base=_api_base, model=_model, cache_dir=llm_cache_dir,
+                on_progress=_progress,
+            )
         except Exception as e:
             error(f"AI 内容生成失败: {e}")
             _cleanup()
@@ -135,6 +145,10 @@ def generate_video(
             warn(f"未找到 {script_path}，将使用文档内容作为脚本")
             script_path.write_text(document_text[:500], encoding="utf-8")
 
+    if _check_cancel():
+        _cleanup()
+        return result
+
     if dry_run:
         info("Dry-run 模式，跳过 TTS 和渲染")
         result["success"] = True
@@ -146,12 +160,17 @@ def generate_video(
         _cleanup()
         return result
 
-    # ── Step 3: 同步画面文字到旁白脚本 ──
-    step(3 if not skip_llm else 2, total_steps, "同步画面文字到旁白脚本")
-    sync_script_from_html(project_dir)
+    # ── Step 3: 同步画面文字到旁白脚本（仅 skip-llm 模式需要从 HTML 同步）──
+    if skip_llm:
+        step(2, total_steps, "同步画面文字到旁白脚本")
+        sync_script_from_html(project_dir)
+
+    if _check_cancel():
+        _cleanup()
+        return result
 
     # ── Step 4: TTS ──
-    step(4 if not skip_llm else 3, total_steps, "TTS 语音合成")
+    step(3, total_steps, "TTS 语音合成")
     _progress("TTS 配音生成中...")
     tts_ok = run_tts(project_dir)
     audio_duration = 0
@@ -171,8 +190,12 @@ def generate_video(
     else:
         error("TTS 生成失败，视频将无配音")
 
+    if _check_cancel():
+        _cleanup()
+        return result
+
     # ── Step 5: 渲染 ──
-    step(5 if not skip_llm else 4, total_steps, "HyperFrames 视频渲染")
+    step(4, total_steps, "HyperFrames 视频渲染")
     _progress("视频渲染中（这可能需要几分钟）...")
 
     # 渲染前检查磁盘空间
@@ -185,8 +208,12 @@ def generate_video(
     output_mp4 = run_render(project_dir)
     result["steps"]["render"] = output_mp4 is not None
 
+    if _check_cancel():
+        _cleanup()
+        return result
+
     # ── Step 6: 复制输出 ──
-    step(6 if not skip_llm else 5, total_steps, "输出视频文件")
+    step(5, total_steps, "输出视频文件")
 
     if output_mp4 and output_mp4.exists():
         output_name = output or f"{input_path.stem}.mp4"
