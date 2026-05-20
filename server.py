@@ -2,17 +2,21 @@
 server.py — 文档→视频 API 服务
 ================================
 FastAPI + SQLite，Worker 已拆分为独立进程。
+支持飞书多维表格用户认证。
 
 启动:  uvicorn server:app --host 0.0.0.0 --port 8000
 Worker: python worker.py
 """
 
 import os
+import re
+import random
+import time
 import uuid
 import sqlite3
 from pathlib import Path
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, UploadFile, File, HTTPException, Request
+from fastapi import FastAPI, UploadFile, File, HTTPException, Request, Depends, Header
 from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -23,6 +27,7 @@ from pipeline.db import (
 )
 from pipeline.utils import sanitize_filename
 from pipeline.llm import LLMCache
+from pipeline.feishu_db import create_user, login, get_user, update_user as feishu_update_user
 
 
 # ── 配置 ───────────────────────────────────────────────────────────
@@ -69,7 +74,6 @@ class RateLimiter:
         return max(0, self.max_requests - active)
 
 
-import time
 _post_limiter = RateLimiter(RATE_LIMIT_REQUESTS, RATE_LIMIT_WINDOW)
 
 
@@ -98,6 +102,220 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+# ── 用户会话 ──────────────────────────────────────────────────
+# token → user_id 的简单内存映射（重启后失效）
+_sessions: dict[str, str] = {}
+
+
+def _get_current_user(authorization: str = Header("")) -> dict | None:
+    """从 Authorization header 解析当前登录用户"""
+    if not authorization.startswith("Bearer "):
+        return None
+    token = authorization[7:]
+    user_id = _sessions.get(token)
+    if not user_id:
+        return None
+    return get_user(user_id)
+
+
+# ── 验证码 & 邮箱激活 ─────────────────────────────────────────
+_verify_codes: dict[str, dict] = {}
+_activation_tokens: dict[str, str] = {}
+_activated_emails: set[str] = set()  # 已激活邮箱列表
+
+SMTP_HOST = os.environ.get("SMTP_HOST", "")
+SMTP_PORT = int(os.environ.get("SMTP_PORT", "465"))
+SMTP_USER = os.environ.get("SMTP_USER", "")
+SMTP_PASS = os.environ.get("SMTP_PASS", "")
+
+import random
+
+
+def _send_email(to: str, subject: str, body: str):
+    """通过 SMTP 发送邮件（不配置则只打印到控制台）"""
+    if not (SMTP_HOST and SMTP_USER and SMTP_PASS):
+        print(f"[auth] SMTP 未配置，邮件内容:\n  To: {to}\n  Subject: {subject}\n  Body: {body}")
+        return False
+    try:
+        import smtplib
+        from email.mime.text import MIMEText
+        msg = MIMEText(body, "plain", "utf-8")
+        msg["Subject"] = subject
+        msg["From"] = SMTP_USER
+        msg["To"] = to
+        if SMTP_PORT == 465:
+            with smtplib.SMTP_SSL(SMTP_HOST, SMTP_PORT) as s:
+                s.login(SMTP_USER, SMTP_PASS)
+                s.send_message(msg)
+        else:
+            with smtplib.SMTP(SMTP_HOST, SMTP_PORT) as s:
+                s.starttls()
+                s.login(SMTP_USER, SMTP_PASS)
+                s.send_message(msg)
+        print(f"[auth] 邮件已发送到 {to}")
+        return True
+    except Exception as e:
+        print(f"[auth] SMTP 发送失败: {e}")
+        return False
+
+
+@app.post("/api/auth/send-code")
+def send_verify_code(payload: dict):
+    """发送验证码到手机或邮箱"""
+    phone = payload.get("phone", "")
+    email = payload.get("email", "")
+    target = phone or email
+    if not target:
+        raise HTTPException(400, "手机号或邮箱不能为空")
+
+    code = str(random.randint(100000, 999999))
+    expires = time.time() + 300  # 5 分钟
+    _verify_codes[target] = {"code": code, "expires": expires, "verified": False}
+
+    if email:
+        _send_email(email, "文生视频 - 验证码", f"您的验证码是：{code}，5 分钟内有效。")
+    else:
+        print(f"[auth] 验证码: {code}（发给 {phone}）")
+
+    # 开发模式（未配置 SMTP）直接返回验证码，方便调试
+    if not (SMTP_HOST and SMTP_USER and SMTP_PASS) or not email:
+        return {"success": True, "dev_code": code}
+
+    return {"success": True}
+
+
+@app.post("/api/auth/verify-code")
+def verify_code(payload: dict):
+    """验证手机/邮箱验证码"""
+    phone = payload.get("phone", "")
+    email = payload.get("email", "")
+    target = phone or email
+    code = payload.get("code", "")
+    if not target or not code:
+        raise HTTPException(400, "参数不完整")
+    entry = _verify_codes.get(target)
+    if not entry:
+        raise HTTPException(400, "请先发送验证码")
+    if time.time() > entry["expires"]:
+        _verify_codes.pop(target, None)
+        raise HTTPException(400, "验证码已过期，请重新发送")
+    if entry["code"] != code:
+        raise HTTPException(400, "验证码错误")
+    entry["verified"] = True
+    return {"success": True, "verified": True}
+
+
+@app.post("/api/auth/send-activation")
+def send_activation(payload: dict):
+    """发送邮箱激活链接"""
+    email = payload.get("email", "")
+    if not email:
+        raise HTTPException(400, "邮箱不能为空")
+    token = uuid.uuid4().hex
+    _activation_tokens[token] = email
+    frontend_url = os.environ.get("PUBLIC_URL", "http://localhost:3000")
+    link = f"{frontend_url}/activate?token={token}"
+    _send_email(email, "文生视频 - 邮箱激活",
+                f"请点击以下链接激活您的邮箱：\n\n{link}\n\n链接 30 分钟内有效。")
+    print(f"[auth] 激活链接: {link}")
+    return {"success": True}
+
+
+@app.get("/api/auth/activate")
+def activate_email(token: str = ""):
+    """激活邮箱"""
+    email = _activation_tokens.pop(token, None)
+    if not email:
+        raise HTTPException(400, "激活链接无效或已过期")
+    _activated_emails.add(email)
+    return {"success": True, "email": email, "message": "邮箱已激活"}
+
+
+# ── 认证 API ──────────────────────────────────────────────────
+
+@app.post("/api/auth/register")
+def register(payload: dict, request: Request = None):
+    """注册新用户（支持手机验证码和邮箱激活验证）"""
+    account = payload.get("account", "")
+    password = payload.get("password", "")
+    nickname = payload.get("nickname", "")
+    phone = payload.get("phone", "")
+    email = payload.get("email", "")
+    code = payload.get("code", "")
+
+    if not account or not password:
+        raise HTTPException(400, "账号和密码不能为空")
+    if len(password) < 6:
+        raise HTTPException(400, "密码至少 6 位")
+    if not re.match(r'^[a-zA-Z0-9]+$', account):
+        raise HTTPException(400, "账号只能包含英文字母和数字")
+    if phone:
+        if not re.match(r'^1\d{10}$', phone):
+            raise HTTPException(400, "手机号格式不正确（11 位，以 1 开头）")
+
+    if phone:
+        entry = _verify_codes.get(phone)
+        if not entry or not entry.get("verified"):
+            raise HTTPException(400, "手机号未验证，请先获取验证码并验证")
+        _verify_codes.pop(phone, None)
+
+    if email and email not in _activated_emails:
+        raise HTTPException(400, "邮箱未激活，请先通过激活链接激活")
+
+    try:
+        user = create_user(
+            account, password,
+            ip=get_client_ip(request),
+            nickname=nickname or account,
+            phone=phone,
+            email=email,
+        )
+        return {"success": True, "user_id": user["user_id"], "account": user["account"]}
+    except ValueError as e:
+        raise HTTPException(409, str(e))
+
+
+@app.post("/api/auth/login")
+def auth_login(payload: dict, request: Request = None):
+    """登录，返回会话 token"""
+    account = payload.get("account", "")
+    password = payload.get("password", "")
+    if not account or not password:
+        raise HTTPException(400, "账号和密码不能为空")
+    user = login(account, password, ip=get_client_ip(request))
+    if not user:
+        raise HTTPException(401, "账号或密码错误")
+
+    token = uuid.uuid4().hex
+    _sessions[token] = user["user_id"]
+    return {"token": token, "user": user}
+
+
+@app.get("/api/auth/me")
+def auth_me(current_user: dict = Depends(_get_current_user)):
+    """获取当前登录用户信息"""
+    if not current_user:
+        raise HTTPException(401, "未登录")
+    return current_user
+
+
+@app.put("/api/auth/me")
+def auth_update(fields: dict, current_user: dict = Depends(_get_current_user)):
+    """更新当前用户信息"""
+    if not current_user:
+        raise HTTPException(401, "未登录")
+    updated = feishu_update_user(current_user["user_id"], **fields)
+    return updated
+
+
+@app.post("/api/auth/logout")
+def auth_logout(authorization: str = Header("")):
+    """退出登录"""
+    if authorization.startswith("Bearer "):
+        _sessions.pop(authorization[7:], None)
+    return {"success": True}
 
 
 @app.get("/api/health")
@@ -187,7 +405,6 @@ def cancel_task(task_id: str):
         raise HTTPException(404, "任务不存在")
     if task["status"] not in ("pending", "processing"):
         raise HTTPException(400, f"当前状态不允许取消（{task['status']}）")
-    import time
     db_update_task(task_id, status="cancelled", progress="已取消", updated_at=time.time())
     return {"task_id": task_id, "status": "cancelled"}
 

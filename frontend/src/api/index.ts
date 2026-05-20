@@ -1,4 +1,4 @@
-import type { Task, CreateTaskResponse, HealthResponse } from '../types';
+import type { Task, CreateTaskResponse, HealthResponse, LoginResponse, UserInfo } from '../types';
 
 const BASE = '/api';
 
@@ -51,4 +51,69 @@ export function cancelTask(taskId: string): Promise<{ task_id: string; status: s
 /** 获取视频下载 URL */
 export function getVideoUrl(taskId: string): string {
   return `${BASE}/videos/${taskId}.mp4`;
+}
+
+// ── 认证 ──────────────────────────────────────────────────
+
+function authHeaders(): HeadersInit {
+  const token = localStorage.getItem('token');
+  return token ? { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' } : { 'Content-Type': 'application/json' };
+}
+
+/** 登录 */
+export function login(account: string, password: string): Promise<LoginResponse> {
+  return fetch(`${BASE}/auth/login`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ account, password }),
+  }).then(r => handleResponse<LoginResponse>(r));
+}
+
+/** 注册（支持手机号和邮箱验证） */
+export function register(account: string, password: string, nickname?: string, phone?: string, email?: string, code?: string): Promise<{ success: boolean; user_id: string; account: string }> {
+  return fetch(`${BASE}/auth/register`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ account, password, nickname, phone, email, code }),
+  }).then(r => handleResponse(r));
+}
+
+/** 发送验证码 */
+export function sendCode(phone: string): Promise<{ success: boolean; dev_code?: string }> {
+  return fetch(`${BASE}/auth/send-code`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ phone }),
+  }).then(r => handleResponse(r));
+}
+
+/** 验证验证码 */
+export function verifyCode(phone: string, code: string): Promise<{ success: boolean; verified: boolean }> {
+  return fetch(`${BASE}/auth/verify-code`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ phone, code }),
+  }).then(r => handleResponse(r));
+}
+
+/** 发送邮箱激活 */
+export function sendActivation(email: string): Promise<{ success: boolean }> {
+  return fetch(`${BASE}/auth/send-activation`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email }),
+  }).then(r => handleResponse(r));
+}
+
+/** 获取当前用户信息 */
+export function getCurrentUser(): Promise<UserInfo> {
+  return fetch(`${BASE}/auth/me`, { headers: authHeaders() }).then(r => handleResponse<UserInfo>(r));
+}
+
+/** 退出登录 */
+export function logout(): Promise<void> {
+  return fetch(`${BASE}/auth/logout`, {
+    method: 'POST',
+    headers: authHeaders(),
+  }).then(() => {});
 }

@@ -29,3 +29,24 @@ export type UploadState =
   | { type: 'uploading'; progress: number }
   | { type: 'done'; taskId: string }
   | { type: 'error'; message: string };
+
+/** 用户信息 */
+export interface UserInfo {
+  user_id: string;
+  account: string;
+  nickname: string;
+  phone: string;
+  email: string;
+  member_level: string;
+  remaining_points: number;
+  remaining_count: number;
+  total_recharge: number;
+  expire_time: string;
+  status: string;
+}
+
+/** 登录响应 */
+export interface LoginResponse {
+  token: string;
+  user: UserInfo;
+}
