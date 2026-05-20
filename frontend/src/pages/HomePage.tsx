@@ -1,20 +1,34 @@
-import { useState } from 'react';
 import FileUpload from '../components/FileUpload';
-import TaskProgress from '../components/TaskProgress';
+import type { AppRoute } from '../types';
 
-export default function HomePage() {
-  const [activeTaskId, setActiveTaskId] = useState<string | null>(null);
-  const [uploadKey, setUploadKey] = useState(0);
+interface Props {
+  onNavigate: (route: AppRoute) => void;
+  activeTasks: Array<{ taskId: string; filename: string }>;
+  addActiveTask: (taskId: string, filename: string) => void;
+}
 
-  const handleCancel = () => {
-    setActiveTaskId(null);
-    setUploadKey(k => k + 1);
+export default function HomePage({ onNavigate, activeTasks, addActiveTask }: Props) {
+  const handleSuccess = (taskId: string, filename: string) => {
+    addActiveTask(taskId, filename);
+    onNavigate({ type: 'task', taskId });
+  };
+
+  const goToLatestTask = () => {
+    if (activeTasks.length > 0) {
+      onNavigate({ type: 'task', taskId: activeTasks[activeTasks.length - 1].taskId });
+    }
   };
 
   return (
     <div className="page-home">
-      <FileUpload key={uploadKey} onSuccess={setActiveTaskId} />
-      {activeTaskId && <TaskProgress taskId={activeTaskId} onCancel={handleCancel} />}
+      {activeTasks.length > 0 && (
+        <div className="active-tasks-banner" onClick={goToLatestTask}>
+          <span className="active-tasks-dot" />
+          <span>{activeTasks.length} 个任务运行中，点击查看</span>
+          <span className="active-tasks-arrow">→</span>
+        </div>
+      )}
+      <FileUpload onSuccess={handleSuccess} />
     </div>
   );
 }

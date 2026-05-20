@@ -6,7 +6,7 @@ const ACCEPTED = '.docx,.doc,.txt,.pdf';
 const MAX_MB = 50;
 
 interface Props {
-  onSuccess: (taskId: string) => void;
+  onSuccess: (taskId: string, filename: string) => void;
 }
 
 export default function FileUpload({ onSuccess }: Props) {
@@ -50,7 +50,7 @@ export default function FileUpload({ onSuccess }: Props) {
       const res = await createTask(file);
       clearInterval(timer);
       setState({ type: 'done', taskId: res.task_id });
-      onSuccess(res.task_id);
+      onSuccess(res.task_id, fileName);
     } catch (err) {
       setState({ type: 'error', message: err instanceof Error ? err.message : '上传失败' });
     }

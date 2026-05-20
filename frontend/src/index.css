@@ -156,6 +156,15 @@ body {
 
 .status-error { margin-top: 16px; color: var(--red); font-size: 14px; }
 
+.confirm-cancel {
+  background: #fef2f2; border: 1px solid #fecaca; border-radius: 10px;
+  padding: 16px 20px; text-align: center;
+}
+.confirm-cancel-text {
+  font-size: 14px; color: #991b1b; font-weight: 500; margin-bottom: 12px;
+}
+.confirm-cancel-actions { display: flex; gap: 8px; justify-content: center; }
+
 .status-card.loading { display: flex; flex-direction: column; align-items: center; gap: 12px; }
 
 .spinner {
@@ -288,10 +297,104 @@ body {
 .history-detail { margin-top: 24px; }
 .history-detail h3 { font-size: 16px; color: var(--gray-700); margin-bottom: 8px; }
 
+/* ── Task Tabs ──────────────────────────────────────────── */
+.page-task { display: flex; flex-direction: column; }
+
+.task-tabs {
+  display: flex; gap: 8px; overflow-x: auto; padding: 0 0 20px;
+  white-space: nowrap; flex-shrink: 0;
+}
+
+.task-tab {
+  padding: 6px 16px; border-radius: 8px; font-size: 13px; font-weight: 500;
+  background: var(--gray-100); color: var(--gray-500); border: 1px solid var(--gray-200);
+  cursor: pointer; transition: all .15s; flex-shrink: 0; max-width: 160px;
+  overflow: hidden; text-overflow: ellipsis;
+}
+.task-tab:hover { background: var(--gray-200); color: var(--gray-700); }
+.task-tab.active {
+  background: var(--primary-light); color: var(--primary); border-color: var(--primary);
+  font-weight: 600;
+}
+.task-tab-new {
+  background: none; border: 1px dashed var(--gray-300); color: var(--gray-500);
+}
+.task-tab-new:hover { border-color: var(--primary); color: var(--primary); }
+
+/* ── Active Tasks Banner ────────────────────────────────── */
+.active-tasks-banner {
+  display: flex; align-items: center; gap: 8px;
+  background: var(--primary-light); border: 1px solid rgba(99,102,241,0.2);
+  border-radius: 10px; padding: 10px 16px; margin-bottom: 16px;
+  cursor: pointer; transition: all .15s; font-size: 14px; color: var(--primary);
+}
+.active-tasks-banner:hover { background: rgba(99,102,241,0.18); }
+.active-tasks-dot {
+  width: 8px; height: 8px; border-radius: 50%; background: var(--primary);
+  animation: pulse 1.5s ease infinite;
+}
+.active-tasks-arrow { margin-left: auto; font-size: 16px; font-weight: 600; }
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+/* ── Pagination ──────────────────────────────────────────── */
+.pagination {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 16px 0; flex-wrap: wrap; gap: 8px;
+}
+.pagination-info { font-size: 13px; color: var(--gray-400); }
+.pagination-btns { display: flex; gap: 8px; }
+.pagination-btns .btn { font-size: 13px; padding: 6px 14px; }
+.pagination-btns .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
 /* ── Responsive ──────────────────────────────────────────── */
-@media (max-width: 640px) {
+@media (max-width: 768px) {
+  .header-inner { padding: 0 12px; gap: 8px; }
+  .app-title { font-size: 17px; white-space: nowrap; }
+  .header-right { gap: 8px; }
+  .app-nav { gap: 2px; }
+  .nav-btn { padding: 6px 10px; font-size: 13px; }
+  .user-name { display: none; }
+  .user-level { font-size: 10px; padding: 1px 4px; }
   .app-main { padding: 16px; }
-  .upload-card { padding: 32px 16px; }
-  .task-item { flex-direction: column; align-items: flex-start; gap: 8px; }
+  .status-meta { flex-direction: column; gap: 4px; }
+}
+
+@media (max-width: 640px) {
+  .app-main { padding: 12px; }
+  .upload-card { padding: 24px 12px; }
+  .upload-icon { font-size: 36px; }
+  .upload-card h2 { font-size: 18px; }
+  .upload-hint { font-size: 12px; }
+
+  .login-card { padding: 28px 16px; }
+  .login-card h2 { font-size: 20px; }
+  .login-icon { font-size: 40px; }
+  .login-input { font-size: 14px; padding: 10px 12px; }
+  .code-btn { font-size: 12px; padding: 10px 8px; }
+
+  .task-item { flex-direction: column; align-items: flex-start; gap: 6px; }
   .task-item-right { width: 100%; justify-content: space-between; }
+  .task-filename { font-size: 13px; word-break: break-all; }
+  .task-time { font-size: 11px; }
+
+  .status-card { padding: 20px 12px; }
+  .status-icon { font-size: 28px; }
+  .status-label { font-size: 16px; }
+  .video-preview { max-width: 100%; }
+
+  .confirm-cancel { padding: 12px; }
+  .confirm-cancel-text { font-size: 13px; }
+  .confirm-cancel-actions { flex-direction: column; gap: 6px; }
+}
+
+@media (max-width: 400px) {
+  .login-card { padding: 20px 12px; }
+  .code-row { flex-direction: column; }
+  .code-btn { width: 100%; }
+  .header-inner { padding: 0 8px; }
+  .nav-btn { padding: 4px 8px; font-size: 12px; }
 }

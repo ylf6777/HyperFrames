@@ -95,16 +95,24 @@ def db_create_task(task_id: str, filename: str, client_ip: str = ""):
     conn.close()
 
 
-def db_list_tasks(limit: int = 20) -> list[dict]:
+def db_list_tasks(limit: int = 20, offset: int = 0) -> list[dict]:
     conn = get_conn()
     conn.row_factory = sqlite3.Row
     rows = conn.execute(
         "SELECT id, status, filename, progress, error, created_at, updated_at "
-        "FROM tasks ORDER BY created_at DESC LIMIT ?",
-        (limit,),
+        "FROM tasks ORDER BY created_at DESC LIMIT ? OFFSET ?",
+        (limit, offset),
     ).fetchall()
     conn.close()
     return [{"task_id": r["id"], **{k: v for k, v in dict(r).items() if k != "id"}} for r in rows]
+
+
+def db_count_tasks() -> int:
+    """返回任务总数"""
+    conn = get_conn()
+    cnt = conn.execute("SELECT COUNT(*) FROM tasks").fetchone()[0]
+    conn.close()
+    return cnt
 
 
 def db_pending_tasks(max_concurrent: int) -> list[dict]:

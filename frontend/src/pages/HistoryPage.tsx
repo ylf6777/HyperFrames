@@ -1,20 +1,15 @@
-import { useState } from 'react';
 import TaskList from '../components/TaskList';
-import TaskProgress from '../components/TaskProgress';
+import type { AppRoute } from '../types';
 
-export default function HistoryPage() {
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+interface Props {
+  onNavigate: (route: AppRoute) => void;
+}
 
+export default function HistoryPage({ onNavigate }: Props) {
   return (
     <div className="page-history">
       <h2>历史记录</h2>
-      <TaskList onSelect={setSelectedId} />
-      {selectedId && (
-        <div className="history-detail">
-          <h3>任务详情</h3>
-          <TaskProgress taskId={selectedId} />
-        </div>
-      )}
+      <TaskList onSelect={(taskId) => onNavigate({ type: 'task', taskId })} />
     </div>
   );
 }

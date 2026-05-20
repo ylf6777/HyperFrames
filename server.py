@@ -18,6 +18,7 @@ from pathlib import Path
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, UploadFile, File, HTTPException, Request, Depends, Header
 from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 
 from pipeline.db import (
@@ -27,7 +28,7 @@ from pipeline.db import (
 )
 from pipeline.utils import sanitize_filename
 from pipeline.llm import LLMCache
-from pipeline.feishu_db import create_user, login, get_user, update_user as feishu_update_user
+from pipeline.feishu_db import create_user, login, get_user, update_user as feishu_update_user, search_records, update_password
 
 
 # ── 配置 ───────────────────────────────────────────────────────────
@@ -38,7 +39,7 @@ ALLOW_ORIGINS = os.environ.get("ALLOW_ORIGINS", "*").split(",")
 RATE_LIMIT_REQUESTS = int(os.environ.get("RATE_LIMIT_REQUESTS", "1"))
 RATE_LIMIT_WINDOW = int(os.environ.get("RATE_LIMIT_WINDOW", "60"))
 MAX_TASKS_PER_IP_PENDING = int(os.environ.get("MAX_TASKS_PER_IP_PENDING", "2"))
-MAX_TASKS_PER_IP_TOTAL = int(os.environ.get("MAX_TASKS_PER_IP_TOTAL", "10"))
+MAX_TASKS_PER_IP_TOTAL = int(os.environ.get("MAX_TASKS_PER_IP_TOTAL", "1000"))
 MAX_TASKS_GLOBAL = int(os.environ.get("MAX_TASKS_GLOBAL", "100"))
 
 
@@ -318,6 +319,66 @@ def auth_logout(authorization: str = Header("")):
     return {"success": True}
 
 
+# ── 忘记密码 ──────────────────────────────────────────────────
+
+@app.post("/api/auth/forgot-password/send-code")
+def forgot_password_send_code(payload: dict):
+    """忘记密码 — 向绑定的手机号发送验证码"""
+    account = payload.get("account", "")
+    if not account:
+        raise HTTPException(400, "账号不能为空")
+
+    records = search_records("账号", account)
+    if not records:
+        raise HTTPException(404, "账号不存在")
+
+    phone = records[0].get("fields", {}).get("手机号", "")
+    if not phone:
+        raise HTTPException(400, "该账号未绑定手机号，无法重置密码")
+
+    code = str(random.randint(100000, 999999))
+    expires = time.time() + 300
+    _verify_codes[phone] = {"code": code, "expires": expires, "verified": False}
+    print(f"[auth] 重置密码验证码: {code}（发给 {phone}）")
+
+    if not (SMTP_HOST and SMTP_USER and SMTP_PASS):
+        return {"success": True, "dev_code": code}
+    return {"success": True}
+
+
+@app.post("/api/auth/forgot-password/reset")
+def forgot_password_reset(payload: dict):
+    """忘记密码 — 验证码验证后重置密码"""
+    account = payload.get("account", "")
+    code = payload.get("code", "")
+    new_password = payload.get("new_password", "")
+
+    if not account or not code or not new_password:
+        raise HTTPException(400, "参数不完整")
+    if len(new_password) < 6:
+        raise HTTPException(400, "密码至少 6 位")
+
+    records = search_records("账号", account)
+    if not records:
+        raise HTTPException(404, "账号不存在")
+
+    fields = records[0].get("fields", {})
+    phone = fields.get("手机号", "")
+    if not phone:
+        raise HTTPException(400, "该账号未绑定手机号")
+
+    entry = _verify_codes.get(phone)
+    if not entry or not entry.get("verified"):
+        raise HTTPException(400, "请先获取验证码并验证")
+    _verify_codes.pop(phone, None)
+
+    try:
+        update_password(fields.get("用户ID", ""), new_password)
+        return {"success": True, "message": "密码已重置，请重新登录"}
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
 @app.get("/api/health")
 def health():
     return {"status": "ok"}
@@ -428,10 +489,12 @@ def get_video(task_id: str):
 
 
 @app.get("/api/tasks")
-def list_tasks(limit: int = 20):
-    """查看最近的任务列表"""
-    from pipeline.db import db_list_tasks
-    return db_list_tasks(limit)
+def list_tasks(limit: int = 20, offset: int = 0):
+    """查看任务列表（带分页）"""
+    from pipeline.db import db_list_tasks, db_count_tasks
+    tasks = db_list_tasks(limit, offset)
+    total = db_count_tasks()
+    return {"tasks": tasks, "total": total, "limit": limit, "offset": offset}
 
 
 # ── LLM 缓存管理 ────────────────────────────────────────────────
@@ -459,6 +522,28 @@ def delete_cache_entry(key: str):
     """删除指定缓存"""
     ok = _llm_cache.delete(key)
     return {"status": "ok" if ok else "not_found"}
+
+
+# ── 前端静态文件托管（生产环境用 nginx 替代更优）──
+FRONTEND_DIST = Path(__file__).parent / "frontend" / "dist"
+
+if FRONTEND_DIST.exists():
+    app.mount("/assets", StaticFiles(directory=str(FRONTEND_DIST / "assets")), name="assets")
+
+    @app.get("/favicon.svg")
+    async def favicon():
+        return FileResponse(str(FRONTEND_DIST / "favicon.svg"))
+
+    @app.get("/icons.svg")
+    async def icons():
+        return FileResponse(str(FRONTEND_DIST / "icons.svg"))
+
+    @app.get("/{full_path:path}")
+    async def serve_frontend(full_path: str):
+        """SPA 兜底：所有非 API 路径返回 index.html"""
+        if full_path.startswith("api/"):
+            raise HTTPException(404)
+        return FileResponse(str(FRONTEND_DIST / "index.html"))
 
 
 if __name__ == "__main__":

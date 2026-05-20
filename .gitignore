@@ -10,6 +10,7 @@ dist/
 .DS_Store
 __pycache__/
 _server_data/
+_test_data/
 .agents/
 .claude/
 __hyperframes_source/

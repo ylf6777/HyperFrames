@@ -37,8 +37,10 @@ export function getTask(taskId: string): Promise<Task> {
 }
 
 /** 获取任务历史列表 */
-export function listTasks(limit = 20): Promise<Task[]> {
-  return fetch(`${BASE}/tasks?limit=${limit}`).then(r => handleResponse<Task[]>(r));
+export function listTasks(limit = 20, offset = 0): Promise<{ tasks: Task[]; total: number }> {
+  return fetch(`${BASE}/tasks?limit=${limit}&offset=${offset}`).then(r =>
+    handleResponse<{ tasks: Task[]; total: number }>(r),
+  );
 }
 
 /** 取消任务 */
@@ -116,4 +118,22 @@ export function logout(): Promise<void> {
     method: 'POST',
     headers: authHeaders(),
   }).then(() => {});
+}
+
+/** 忘记密码 — 发送重置验证码 */
+export function forgotPasswordSendCode(account: string): Promise<{ success: boolean; dev_code?: string }> {
+  return fetch(`${BASE}/auth/forgot-password/send-code`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ account }),
+  }).then(r => handleResponse(r));
+}
+
+/** 忘记密码 — 验证码验证后重置 */
+export function forgotPasswordReset(account: string, code: string, newPassword: string): Promise<{ success: boolean; message: string }> {
+  return fetch(`${BASE}/auth/forgot-password/reset`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ account, code, new_password: newPassword }),
+  }).then(r => handleResponse(r));
 }

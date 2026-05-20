@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from 'react';
-import { login as apiLogin, register as apiRegister, sendCode, verifyCode, sendActivation } from '../api';
+import { login as apiLogin, register as apiRegister, sendCode, verifyCode, sendActivation, forgotPasswordSendCode, forgotPasswordReset } from '../api';
 import type { UserInfo } from '../types';
 
 interface Props {
@@ -7,7 +7,7 @@ interface Props {
 }
 
 export default function LoginPage({ onLogin }: Props) {
-  const [mode, setMode] = useState<'login' | 'register'>('login');
+  const [mode, setMode] = useState<'login' | 'register' | 'forgot'>('login');
   const [account, setAccount] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPwd, setConfirmPwd] = useState('');
@@ -20,11 +20,16 @@ export default function LoginPage({ onLogin }: Props) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
+  const [resetPwd, setResetPwd] = useState('');
+  const [resetConfirmPwd, setResetConfirmPwd] = useState('');
 
-  const switchMode = () => {
-    setMode(m => (m === 'login' ? 'register' : 'login'));
+  const switchMode = (target?: 'login' | 'register' | 'forgot') => {
+    setMode(target || (mode === 'login' ? 'register' : 'login'));
     setError('');
     setSuccessMsg('');
+    setCode('');
+    setCodeSent(false);
+    setCodeCountdown(0);
   };
 
   const startCountdown = () => {
@@ -69,9 +74,53 @@ export default function LoginPage({ onLogin }: Props) {
     }
   };
 
+  const handleForgotSendCode = async () => {
+    if (!account.trim()) { setError('请先填写账号'); return; }
+    setError('');
+    try {
+      const res = await forgotPasswordSendCode(account.trim());
+      setCodeSent(true);
+      startCountdown();
+      if ((res as any).dev_code) {
+        setSuccessMsg(`验证码: ${(res as any).dev_code}（开发模式）`);
+      } else {
+        setSuccessMsg('验证码已发送到注册手机');
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '发送失败');
+    }
+  };
+
+  const handleForgotReset = async () => {
+    setError('');
+    if (!account.trim() || !code) { setError('请填写账号和验证码'); return; }
+    if (resetPwd.length < 6) { setError('新密码至少 6 位'); return; }
+    if (resetPwd !== resetConfirmPwd) { setError('两次密码不一致'); return; }
+
+    setLoading(true);
+    try {
+      await forgotPasswordReset(account.trim(), code, resetPwd);
+      setSuccessMsg('密码已重置，请重新登录');
+      setTimeout(() => switchMode('login'), 2000);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '重置失败');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
     setError('');
+
+    if (mode === 'forgot') {
+      if (!account.trim()) {
+        setError('请输入账号');
+        return;
+      }
+      handleForgotReset();
+      return;
+    }
 
     if (!account.trim() || !password) {
       setError('请输入账号和密码');
@@ -100,6 +149,9 @@ export default function LoginPage({ onLogin }: Props) {
     setLoading(true);
     try {
       if (mode === 'register') {
+        if (phone && code) {
+          await verifyCode(phone, code);
+        }
         await apiRegister(account, password, nickname || account, phone, email, code);
         setSuccessMsg('注册成功！请登录');
         setMode('login');
@@ -121,7 +173,9 @@ export default function LoginPage({ onLogin }: Props) {
       <div className="login-card">
         <div className="login-icon">🎬</div>
         <h2>文生视频</h2>
-        <p className="login-subtitle">{mode === 'login' ? '登录后继续' : '注册新账号'}</p>
+        <p className="login-subtitle">
+          {mode === 'login' ? '登录后继续' : mode === 'register' ? '注册新账号' : '重置密码'}
+        </p>
 
         <form onSubmit={handleSubmit} className="login-form">
           <input
@@ -132,13 +186,15 @@ export default function LoginPage({ onLogin }: Props) {
             onChange={e => setAccount(e.target.value)}
             autoFocus
           />
-          <input
-            className="login-input"
-            type="password"
-            placeholder="密码"
-            value={password}
-            onChange={e => setPassword(e.target.value)}
-          />
+          {mode !== 'forgot' && (
+            <input
+              className="login-input"
+              type="password"
+              placeholder="密码"
+              value={password}
+              onChange={e => setPassword(e.target.value)}
+            />
+          )}
 
           {mode === 'register' && (
             <>
@@ -203,19 +259,65 @@ export default function LoginPage({ onLogin }: Props) {
             </>
           )}
 
+          {mode === 'forgot' && (
+            <>
+              <div className="code-row">
+                <button
+                  type="button"
+                  className="btn btn-secondary code-btn"
+                  onClick={handleForgotSendCode}
+                  disabled={codeCountdown > 0}
+                  style={{ width: '100%', justifyContent: 'center' }}
+                >
+                  {codeCountdown > 0 ? `${codeCountdown}s 后重新发送` : '发送重置验证码'}
+                </button>
+              </div>
+              {codeSent && (
+                <>
+                  <input
+                    className="login-input"
+                    type="text"
+                    placeholder="输入验证码"
+                    value={code}
+                    onChange={e => setCode(e.target.value)}
+                  />
+                  <input
+                    className="login-input"
+                    type="password"
+                    placeholder="新密码（至少 6 位）"
+                    value={resetPwd}
+                    onChange={e => setResetPwd(e.target.value)}
+                  />
+                  <input
+                    className="login-input"
+                    type="password"
+                    placeholder="确认新密码"
+                    value={resetConfirmPwd}
+                    onChange={e => setResetConfirmPwd(e.target.value)}
+                  />
+                </>
+              )}
+            </>
+          )}
+
           {error && <p className="login-error">{error}</p>}
           {successMsg && <p className="login-success">{successMsg}</p>}
 
           <button type="submit" className="btn btn-primary login-btn" disabled={loading}>
-            {loading ? '处理中...' : mode === 'login' ? '登 录' : '注 册'}
+            {loading ? '处理中...' : mode === 'login' ? '登 录' : mode === 'register' ? '注 册' : '重置密码'}
           </button>
         </form>
 
         <p className="login-switch">
           {mode === 'login' ? (
-            <>没有账号？<button className="link-btn" onClick={switchMode}>注册</button></>
+            <>
+              没有账号？<button className="link-btn" onClick={() => switchMode('register')}>注册</button>
+              ｜<button className="link-btn" onClick={() => switchMode('forgot')}>忘记密码</button>
+            </>
+          ) : mode === 'register' ? (
+            <>已有账号？<button className="link-btn" onClick={() => switchMode('login')}>去登录</button></>
           ) : (
-            <>已有账号？<button className="link-btn" onClick={switchMode}>去登录</button></>
+            <>想起密码了？<button className="link-btn" onClick={() => switchMode('login')}>去登录</button></>
           )}
         </p>
       </div>

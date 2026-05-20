@@ -299,6 +299,21 @@ def update_user(user_id: str, **fields) -> dict:
     return get_user(user_id)
 
 
+def update_password(user_id: str, new_password: str) -> dict:
+    """更新用户密码（绕过 update_user 的字段过滤）"""
+    records = search_records("用户ID", user_id)
+    if not records:
+        raise ValueError(f"用户 {user_id} 不存在")
+    hashed = _hash_password(new_password)
+    _request(
+        "PUT",
+        f"/bitable/v1/apps/{BASE_TOKEN}/tables/{TABLE_ID}/records/{records[0]['record_id']}",
+        {"fields": {"密码": hashed}},
+    )
+    _cache_clear()
+    return get_user(user_id)
+
+
 def list_users(page_size: int = 50) -> list[dict]:
     """列出所有用户"""
     data = _request(

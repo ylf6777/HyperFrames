@@ -50,3 +50,9 @@ export interface LoginResponse {
   token: string;
   user: UserInfo;
 }
+
+/** 应用路由 */
+export type AppRoute =
+  | { type: 'home' }
+  | { type: 'history' }
+  | { type: 'task'; taskId: string };

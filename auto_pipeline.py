@@ -6,8 +6,8 @@ auto_pipeline.py — CLI 入口：全自动文档到视频生成管线
 
 使用方法:
   1. 设置环境变量:
-     export ANTHROPIC_API_KEY=sk-xxx  (API Key)
-     export ANTHROPIC_BASE_URL=...    (可选，自定义 API 地址)
+     export HYPERFRAMES_API_KEY=sk-xxx  (API Key)
+     export HYPERFRAMES_BASE_URL=...    (可选，自定义 API 地址)
 
   2. 运行:
      python auto_pipeline.py 文档.docx --project my-video --output 我的视频.mp4
@@ -36,8 +36,8 @@ def main():
   python auto_pipeline.py 教案.txt --skip-llm   (仅执行 TTS + 渲染)
 
 API Key 请通过环境变量设置:
-  export ANTHROPIC_API_KEY=sk-xxx
-  export ANTHROPIC_BASE_URL=https://... (可选)
+  export HYPERFRAMES_API_KEY=sk-xxx
+  export HYPERFRAMES_BASE_URL=https://... (可选)
         """,
     )
     parser.add_argument("input", help="输入文档路径 (.docx / .doc / .txt / .pdf)")

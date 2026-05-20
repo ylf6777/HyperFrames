@@ -28,6 +28,7 @@ export default function TaskProgress({ taskId, onCancel }: Props) {
   const [error, setError] = useState('');
   const [elapsed, setElapsed] = useState(0);
   const [cancelling, setCancelling] = useState(false);
+  const [showConfirm, setShowConfirm] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -62,7 +63,12 @@ export default function TaskProgress({ taskId, onCancel }: Props) {
     };
   }, [taskId]);
 
-  const handleCancel = async () => {
+  const handleCancelClick = () => {
+    setShowConfirm(true);
+  };
+
+  const handleConfirmCancel = async () => {
+    setShowConfirm(false);
     if (cancelling) return;
     setCancelling(true);
     try {
@@ -71,6 +77,10 @@ export default function TaskProgress({ taskId, onCancel }: Props) {
     } catch {
       setCancelling(false);
     }
+  };
+
+  const handleDismissConfirm = () => {
+    setShowConfirm(false);
   };
 
   function formatElapsed(seconds: number): string {
@@ -95,7 +105,7 @@ export default function TaskProgress({ taskId, onCancel }: Props) {
   const isFinal = task.status === 'completed' || task.status === 'failed' || task.status === 'cancelled';
 
   return (
-    <div className={`status-card status-${task.status}`}>
+    <div className={`status-card status-${task.status}`} data-testid="status-card">
       <div className="status-header">
         <span className="status-icon">{STATUS_ICONS[task.status]}</span>
         <span className="status-label">{STATUS_LABELS[task.status]}</span>
@@ -126,19 +136,33 @@ export default function TaskProgress({ taskId, onCancel }: Props) {
 
       {!isFinal && (
         <div className="status-actions">
-          <button
-            onClick={handleCancel}
-            disabled={cancelling}
-            className="btn"
-            style={{
-              background: cancelling ? '#e5e7eb' : '#fee2e2',
-              color: cancelling ? '#9ca3af' : '#dc2626',
-              border: 'none',
-              cursor: cancelling ? 'not-allowed' : 'pointer',
-            }}
-          >
-            {cancelling ? '取消中...' : '取消任务'}
-          </button>
+          {showConfirm ? (
+            <div className="confirm-cancel">
+              <p className="confirm-cancel-text">确定要取消这个任务吗？</p>
+              <div className="confirm-cancel-actions">
+                <button onClick={handleConfirmCancel} className="btn" style={{ background: '#dc2626', color: '#fff', border: 'none' }}>
+                  确定取消
+                </button>
+                <button onClick={handleDismissConfirm} className="btn btn-secondary">
+                  我再想想
+                </button>
+              </div>
+            </div>
+          ) : (
+            <button
+              onClick={handleCancelClick}
+              disabled={cancelling}
+              className="btn"
+              style={{
+                background: cancelling ? '#e5e7eb' : '#fee2e2',
+                color: cancelling ? '#9ca3af' : '#dc2626',
+                border: 'none',
+                cursor: cancelling ? 'not-allowed' : 'pointer',
+              }}
+            >
+              {cancelling ? '取消中...' : '取消任务'}
+            </button>
+          )}
         </div>
       )}
 
@@ -154,6 +178,9 @@ export default function TaskProgress({ taskId, onCancel }: Props) {
       {task.status === 'failed' && (
         <div className="status-error">
           <p>错误: {task.error || '生成失败，请查看服务端日志'}</p>
+          <button onClick={() => onCancel?.()} className="btn btn-primary" style={{ marginTop: '12px' }}>
+            重新上传
+          </button>
         </div>
       )}
     </div>

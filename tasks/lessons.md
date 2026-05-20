@@ -1,5 +1,22 @@
 # 经验教训
 
+## 2026-05-20: Vitest 组件测试中的 fake timers 和 file upload 陷阱
+
+### fake timers 导致 findByText 超时
+- `vi.useFakeTimers()` 会 mock `setTimeout`/`setInterval`，而 `@testing-library` 的 `findByText` / `waitFor` 内部用 `setTimeout` 轮询
+- fake timers 下这些轮询不会触发 → 测试超时 5000ms
+- **修复**：不要在全局 `beforeEach` 设置 fake timers。只在需要控制时间的特定测试内使用，并在组件渲染 *之前* 调用 `vi.useFakeTimers()`
+
+### fireEvent.change 优于 user.upload
+- `userEvent.upload(element, file)` 在 jsdom 环境下偶尔不触发 `onChange` 或 `inputRef.current.files` 为空
+- 更可靠的方式：`fireEvent.change(input, { target: { files: [file] } })` 直接触发 React 合成事件
+- 注意：`getByLabelText` 获取隐藏的 `display:none` 文件输入框可能失败，改用 `document.querySelector('#id')` 更可靠
+
+### 组件内重复文本导致 getByText/findByText 失败
+- `TaskProgress` 组件在 `.status-label` 和 `.progress-text` 中同时显示相同状态文字（如"排队中"、"已完成"）
+- `getByText`/`findByText` 找到多个匹配时抛出异常，不返回第一个
+- **修复**：用 `findAllByText` 返回数组检查 `length >= 1`，或查询唯一内容（如文件名、data-testid）
+
 ## 2026-05-16: 全面修复 — 默认project/优雅关闭/fallback/CORS/孤儿任务等7项
 
 ### 发现问题清单

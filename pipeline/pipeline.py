@@ -104,12 +104,12 @@ def generate_video(
     # ── Step 2: LLM 内容生成 ──
     if not skip_llm:
         step(2, total_steps, "AI 生成视频内容")
-        _api_key = api_key or os.environ.get("ANTHROPIC_API_KEY")
-        _api_base = api_base or os.environ.get("ANTHROPIC_BASE_URL")
+        _api_key = api_key or os.environ.get("HYPERFRAMES_API_KEY")
+        _api_base = api_base or os.environ.get("HYPERFRAMES_BASE_URL")
         _model = model or os.environ.get("HF_MODEL") or "claude-sonnet-4-6"
 
         if not _api_key:
-            error("需要 API Key！请设置 ANTHROPIC_API_KEY 环境变量")
+            error("需要 API Key！请设置 HYPERFRAMES_API_KEY 环境变量")
             _cleanup()
             return result
 
