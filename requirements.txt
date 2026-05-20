@@ -1,0 +1,9 @@
+# 核心依赖（SQLite 模式无需额外安装）
+fastapi
+uvicorn[standard]
+python-multipart
+requests
+
+# PostgreSQL 模式（可选）
+# pip install psycopg2-binary
+# DB_TYPE=postgres DATABASE_URL=postgresql://user:pass@host/db uvicorn server:app

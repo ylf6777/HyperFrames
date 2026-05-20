@@ -58,7 +58,8 @@ export function getVideoUrl(taskId: string): string {
 // ── 认证 ──────────────────────────────────────────────────
 
 function authHeaders(): HeadersInit {
-  const token = localStorage.getItem('token');
+  let token: string | null = null;
+  try { token = localStorage.getItem('token'); } catch { /* SSR/测试环境 */ }
   return token ? { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' } : { 'Content-Type': 'application/json' };
 }
 

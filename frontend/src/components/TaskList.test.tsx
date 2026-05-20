@@ -54,7 +54,7 @@ describe('任务列表', () => {
     render(<TaskList onSelect={onSelect} />);
     expect(await screen.findByText('report.docx')).toBeInTheDocument();
     expect(screen.getByText('slide.pptx')).toBeInTheDocument();
-    expect(screen.getByText('完成')).toBeInTheDocument();
+    expect(screen.getByText('已完成')).toBeInTheDocument();
     expect(screen.getByText('处理中')).toBeInTheDocument();
   });
 
@@ -72,7 +72,7 @@ describe('任务列表', () => {
     render(<TaskList onSelect={onSelect} />);
     expect(await screen.findByText('排队中')).toBeInTheDocument();
     expect(screen.getByText('处理中')).toBeInTheDocument();
-    expect(screen.getByText('完成')).toBeInTheDocument();
+    expect(screen.getByText('已完成')).toBeInTheDocument();
     expect(screen.getByText('失败')).toBeInTheDocument();
     expect(screen.getByText('已取消')).toBeInTheDocument();
   });

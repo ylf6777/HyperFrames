@@ -184,3 +184,46 @@ def remove_project_dir(project_dir: str):
         shutil.rmtree(project_dir, ignore_errors=True)
     except Exception:
         pass
+
+
+def check_env(role: str = "server"):
+    """启动时校验必填环境变量，缺少则输出错误并退出
+
+    role: 'server' | 'worker'
+    """
+    errors = []
+    warnings = []
+
+    # 所有角色都需要的通用校验
+    db_type = os.environ.get("DB_TYPE", "sqlite")
+    if db_type == "postgres" and not os.environ.get("DATABASE_URL"):
+        errors.append("DB_TYPE=postgres 但 DATABASE_URL 未设置")
+
+    storage = os.environ.get("STORAGE_BACKEND", "local")
+    if storage == "s3":
+        for k in ("S3_ENDPOINT", "S3_ACCESS_KEY", "S3_SECRET_KEY", "S3_BUCKET"):
+            if k not in os.environ:
+                errors.append(f"S3 存储缺少 {k}")
+
+    # Worker 专用校验
+    if role == "worker":
+        if not os.environ.get("HYPERFRAMES_API_KEY"):
+            errors.append("缺少 HYPERFRAMES_API_KEY，视频生成将失败")
+
+    # 飞书（可选，只在配置了部分变量时检查完整性）
+    feishu_keys = ("FEISHU_APP_ID", "FEISHU_APP_SECRET", "FEISHU_BASE_TOKEN", "FEISHU_TABLE_ID")
+    configured_feishu = [k for k in feishu_keys if os.environ.get(k)]
+    if configured_feishu and len(configured_feishu) < len(feishu_keys):
+        missing = [k for k in feishu_keys if k not in configured_feishu]
+        warnings.append(f"飞书配置不完整，缺少: {', '.join(missing)}")
+
+    if errors:
+        print("=" * 50)
+        print("  环境变量检查失败，请配置以下项后重试：")
+        for e in errors:
+            print(f"    - {e}")
+        print("=" * 50)
+        sys.exit(1)
+
+    for w in warnings:
+        print(f"[启动警告] {w}")

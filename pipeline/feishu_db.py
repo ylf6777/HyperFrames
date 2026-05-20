@@ -22,11 +22,14 @@ import threading
 
 import requests
 
-# ── 配置（优先读环境变量，否则用你给我的值）──
-APP_ID = os.environ.get("FEISHU_APP_ID", "cli_aa87eac58f389bb3")
-APP_SECRET = os.environ.get("FEISHU_APP_SECRET", "J5GanVtnsJDM2pAe473XybC1NYH2SPD2")
-BASE_TOKEN = os.environ.get("FEISHU_BASE_TOKEN", "YH8ibNRPgaQjF0sj2jQcPayZnWh")
-TABLE_ID = os.environ.get("FEISHU_TABLE_ID", "tblo4tibU667rtnr")
+# ── 配置（必须通过环境变量设置，禁止硬编码默认值）──
+APP_ID = os.environ.get("FEISHU_APP_ID", "")
+APP_SECRET = os.environ.get("FEISHU_APP_SECRET", "")
+BASE_TOKEN = os.environ.get("FEISHU_BASE_TOKEN", "")
+TABLE_ID = os.environ.get("FEISHU_TABLE_ID", "")
+
+if not all([APP_ID, APP_SECRET, BASE_TOKEN, TABLE_ID]):
+    print("[feishu_db] 警告: 飞书凭证未配置，设置 FEISHU_APP_ID / FEISHU_APP_SECRET / FEISHU_BASE_TOKEN / FEISHU_TABLE_ID")
 
 # ── 连接与会话（复用 TCP 连接，减少握手延迟）──
 _HTTP = requests.Session()
@@ -65,6 +68,8 @@ def _get_token() -> str:
     global _TOKEN, _TOKEN_EXPIRE
     if _TOKEN and time.time() < _TOKEN_EXPIRE - 60:
         return _TOKEN
+    if not all([APP_ID, APP_SECRET]):
+        raise RuntimeError("飞书凭证未配置，请设置 FEISHU_APP_ID 和 FEISHU_APP_SECRET 环境变量")
     resp = _HTTP.post(
         "https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal",
         json={"app_id": APP_ID, "app_secret": APP_SECRET},

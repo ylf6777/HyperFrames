@@ -19,7 +19,7 @@ import os
 import sys
 import time
 import signal
-import shutil
+import logging
 import argparse
 from pathlib import Path
 
@@ -29,17 +29,30 @@ if str(_BASE) not in sys.path:
     sys.path.insert(0, str(_BASE))
 
 from pipeline import generate_video
-from pipeline.utils import sanitize_filename, check_disk_space, remove_project_dir, info, success, warn, error
+from pipeline.utils import sanitize_filename, check_disk_space, remove_project_dir, check_env
 from pipeline.db import (
-    DATA_DIR, TASKS_DIR, VIDEOS_DIR, DOCS_DIR,
+    DATA_DIR, TASKS_DIR, DOCS_DIR,
     db_get_task, db_update_task, db_pending_tasks, db_claim_task,
-    recover_orphaned_tasks,
+    recover_orphaned_tasks, cleanup_old_videos,
 )
+
+
+# ── 日志 ──────────────────────────────────────────────────
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s  %(levelname)-5s  %(message)s",
+    datefmt="%m-%d %H:%M:%S",
+)
+logger = logging.getLogger("worker")
 
 
 # ── 配置 ──────────────────────────────────────────────────
 MAX_CONCURRENT = int(os.environ.get("MAX_CONCURRENT", "2"))
 WORKER_SLEEP = int(os.environ.get("WORKER_SLEEP", "3"))
+TASK_TIMEOUT = int(os.environ.get("TASK_TIMEOUT", "600"))  # 单个任务超时秒数（默认 10 分钟）
+
+# 启动时校验必填环境变量
+check_env(role="worker")
 
 # ── 全局退出信号 ──
 _shutdown = False
@@ -47,7 +60,7 @@ _shutdown = False
 
 def _signal_handler(signum, frame):
     global _shutdown
-    print(f"\n[worker] 收到信号 {signum}，正在优雅退出...")
+    logger.warning("收到信号 %s，正在优雅退出...", signum)
     _shutdown = True
 
 
@@ -60,7 +73,7 @@ def run_task(task_id: str):
     """执行单个生成任务"""
     task = db_get_task(task_id)
     if not task:
-        warn(f"[worker] 任务 {task_id} 不存在")
+        logger.warning("任务 %s 不存在", task_id)
         return
 
     safe_name = sanitize_filename(task["filename"])
@@ -103,16 +116,12 @@ def run_task(task_id: str):
                 progress="已取消",
                 updated_at=time.time(),
             )
-            info(f"[worker] 任务 {task_id} 已取消")
+            logger.info("任务 %s 已取消", task_id)
             return
         elif result["success"] and result["video_path"]:
-            video_dst = VIDEOS_DIR / f"{task_id}.mp4"
-            try:
-                shutil.copy2(result["video_path"], str(video_dst))
-                video_path = str(video_dst)
-            except Exception as e:
-                print(f"[worker] 复制视频到存储目录失败: {e}")
-                video_path = result["video_path"]
+            from pipeline.storage import save as storage_save
+
+            video_path = storage_save(result["video_path"], task_id)
             db_update_task(
                 task_id,
                 status="completed",
@@ -120,7 +129,7 @@ def run_task(task_id: str):
                 progress="完成",
                 updated_at=time.time(),
             )
-            success(f"[worker] 任务 {task_id} 完成")
+            logger.info("任务 %s 完成", task_id)
         else:
             db_update_task(
                 task_id,
@@ -129,7 +138,7 @@ def run_task(task_id: str):
                 progress="失败",
                 updated_at=time.time(),
             )
-            error(f"[worker] 任务 {task_id} 失败")
+            logger.error("任务 %s 失败", task_id)
     except Exception as e:
         db_update_task(
             task_id,
@@ -138,16 +147,16 @@ def run_task(task_id: str):
             progress="失败",
             updated_at=time.time(),
         )
-        error(f"[worker] 任务 {task_id} 异常: {e}")
+        logger.exception("任务 %s 异常", task_id)
     finally:
         # 清理上传的源文档
         try:
             doc_path = str((DOCS_DIR / f"{task_id}_{safe_name}").resolve())
             if os.path.isfile(doc_path):
                 os.remove(doc_path)
-                info(f"[worker] 已清理上传文档: {os.path.basename(doc_path)}")
+                logger.info("已清理上传文档: %s", os.path.basename(doc_path))
         except Exception as e:
-            warn(f"[worker] 清理上传文档失败: {e}")
+            logger.warning("清理上传文档失败: %s", e)
         # 清理临时项目目录
         task_project = str(TASKS_DIR / f"task-{task_id}")
         remove_project_dir(task_project)
@@ -156,17 +165,38 @@ def run_task(task_id: str):
 # ── 主循环 ──────────────────────────────────────────────────
 def main_loop():
     """轮询 pending 任务，用进程内抢占避免重复消费"""
-    print(f"[worker] 启动（最多 {MAX_CONCURRENT} 个并行任务，轮询间隔 {WORKER_SLEEP}s）")
-    print(f"[worker] 按 Ctrl+C 优雅退出\n")
+    logger.info("启动（最多 %s 个并行任务，轮询间隔 %ss）", MAX_CONCURRENT, WORKER_SLEEP)
+    logger.info("按 Ctrl+C 优雅退出")
 
     # 启动时恢复孤儿任务
     recover_orphaned_tasks()
+
+    # 启动时清理过期视频（默认保留 7 天）
+    try:
+        cleaned, freed = cleanup_old_videos(7)
+        if cleaned:
+            logger.info("启动清理: 删除了 %s 个旧视频，释放 %.1f MB", cleaned, freed / 1024 / 1024)
+    except Exception as e:
+        logger.warning("启动清理旧视频失败: %s", e)
+    _last_cleanup = time.time()
 
     running: dict[str, dict] = {}  # task_id -> {"process": ..., "started": ...}
 
     while not _shutdown:
         try:
-            # 清理已完成/失败的子进程记录
+            # 清理已完成/失败的子进程记录，并检查超时
+            now = time.time()
+            timed_out = []
+            for tid, v in list(running.items()):
+                if not v["process"].is_alive():
+                    continue
+                if now - v["started"] > TASK_TIMEOUT:
+                    timed_out.append(tid)
+            for tid in timed_out:
+                logger.warning("任务 %s 超时（>%ss），标记为失败", tid, TASK_TIMEOUT)
+                db_update_task(tid, status="failed", error=f"执行超时（超过 {TASK_TIMEOUT} 秒）", progress="超时", updated_at=time.time())
+                del running[tid]
+            # 只保留仍在运行的线程
             running = {tid: v for tid, v in running.items() if v["process"].is_alive()}
 
             # 有空闲槽位才拉取新任务
@@ -178,7 +208,7 @@ def main_loop():
                     # 原子性抢占
                     if not db_claim_task(tid):
                         continue
-                    info(f"[worker] 开始任务 {tid}: {task['filename']}")
+                    logger.info("开始任务 %s: %s", tid, task["filename"])
 
                     # 使用线程执行，不阻塞轮询
                     import threading
@@ -187,7 +217,21 @@ def main_loop():
                     running[tid] = {"process": t, "started": time.time()}
 
         except Exception as e:
-            print(f"[worker] 轮询异常: {e}")
+            logger.exception("轮询异常")
+
+        # 写入心跳，供 /api/health 检测 Worker 存活
+        try:
+            (DATA_DIR / ".worker_heartbeat").write_text(f"{time.time()}\n")
+        except Exception:
+            pass
+
+        # 每天清理一次过期视频
+        if time.time() - _last_cleanup > 86400:
+            try:
+                cleanup_old_videos(7)
+            except Exception as e:
+                logger.warning("定期清理旧视频失败: %s", e)
+            _last_cleanup = time.time()
 
         # 逐秒检查 _shutdown，避免退出延迟
         for _ in range(WORKER_SLEEP):
@@ -196,15 +240,15 @@ def main_loop():
             time.sleep(1)
 
     # ── 优雅退出 ──
-    print(f"[worker] 正在等待 {len(running)} 个运行中的任务...")
+    logger.info("正在等待 %s 个运行中的任务...", len(running))
     wait_start = time.time()
     for tid, v in running.items():
         v["process"].join(timeout=30)
         elapsed = time.time() - wait_start
         if elapsed > 30:
-            print(f"[worker] 等待超时，{len(running)} 个任务强制结束")
+            logger.warning("等待超时，%s 个任务强制结束", len(running))
             break
-    print("[worker] 已退出")
+    logger.info("已退出")
 
 
 if __name__ == "__main__":

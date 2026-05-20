@@ -1,0 +1,82 @@
+# 文生视频 — Docker Compose
+# 使用: docker compose up -d
+# 环境变量: 复制 .env.example 到 .env 或直接 export
+
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: text2video
+      POSTGRES_USER: text2video
+      POSTGRES_PASSWORD: ${PG_PASSWORD}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U text2video -d text2video"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
+  app:
+    build:
+      context: .
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DB_TYPE: postgres
+      DATABASE_URL: "postgresql://text2video:${PG_PASSWORD}@db:5432/text2video"
+      HYPERFRAMES_API_KEY: ${HYPERFRAMES_API_KEY}
+      HYPERFRAMES_BASE_URL: ${HYPERFRAMES_BASE_URL}
+      HYPERFRAMES_VERSION: ${HYPERFRAMES_VERSION:-0.6.6}
+      FEISHU_APP_ID: ${FEISHU_APP_ID}
+      FEISHU_APP_SECRET: ${FEISHU_APP_SECRET}
+      FEISHU_BASE_TOKEN: ${FEISHU_BASE_TOKEN}
+      FEISHU_TABLE_ID: ${FEISHU_TABLE_ID}
+      SMTP_HOST: ${SMTP_HOST}
+      SMTP_PORT: ${SMTP_PORT:-465}
+      SMTP_USER: ${SMTP_USER}
+      SMTP_PASS: ${SMTP_PASS}
+      PUBLIC_URL: ${PUBLIC_URL:-http://localhost}
+      ALLOW_ORIGINS: ${ALLOW_ORIGINS:-*}
+      MAX_FILE_SIZE_MB: ${MAX_FILE_SIZE_MB:-50}
+      MAX_TASKS_GLOBAL: ${MAX_TASKS_GLOBAL:-100}
+      MAX_TASKS_PER_IP_PENDING: ${MAX_TASKS_PER_IP_PENDING:-2}
+      MAX_LOGIN_ATTEMPTS: ${MAX_LOGIN_ATTEMPTS:-5}
+    volumes:
+      - server_data:/app/_server_data
+    restart: unless-stopped
+
+  worker:
+    build:
+      context: .
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DB_TYPE: postgres
+      DATABASE_URL: "postgresql://text2video:${PG_PASSWORD}@db:5432/text2video"
+      HYPERFRAMES_API_KEY: ${HYPERFRAMES_API_KEY}
+      HYPERFRAMES_BASE_URL: ${HYPERFRAMES_BASE_URL}
+      HYPERFRAMES_VERSION: ${HYPERFRAMES_VERSION:-0.6.6}
+      MAX_CONCURRENT: ${MAX_CONCURRENT:-2}
+      TASK_TIMEOUT: ${TASK_TIMEOUT:-600}
+    volumes:
+      - server_data:/app/_server_data
+    command: ["python", "worker.py"]
+    restart: unless-stopped
+
+  nginx:
+    image: nginx:alpine
+    depends_on:
+      - app
+    ports:
+      - "${PORT:-80}:80"
+    volumes:
+      - ./deploy/nginx-docker.conf:/etc/nginx/conf.d/default.conf:ro
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+  server_data:

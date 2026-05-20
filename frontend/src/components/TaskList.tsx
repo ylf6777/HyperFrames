@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import { listTasks } from '../api';
 import type { Task } from '../types';
+import { STATUS_LABEL } from '../types';
 
 const PAGE_SIZE = 20;
 
@@ -10,14 +11,6 @@ const STATUS_BADGE: Record<string, string> = {
   completed: 'badge-completed',
   failed: 'badge-failed',
   cancelled: 'badge-cancelled',
-};
-
-const STATUS_LABEL: Record<string, string> = {
-  pending: '排队中',
-  processing: '处理中',
-  completed: '完成',
-  failed: '失败',
-  cancelled: '已取消',
 };
 
 export default function TaskList({ onSelect }: { onSelect?: (taskId: string) => void }) {

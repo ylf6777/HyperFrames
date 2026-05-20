@@ -13,7 +13,6 @@ import re
 import random
 import time
 import uuid
-import sqlite3
 from pathlib import Path
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, UploadFile, File, HTTPException, Request, Depends, Header
@@ -24,9 +23,13 @@ from fastapi.middleware.cors import CORSMiddleware
 from pipeline.db import (
     DATA_DIR, VIDEOS_DIR, DOCS_DIR, DB_PATH,
     db_get_task, db_update_task, db_create_task,
+    db_create_session, db_get_session, db_delete_session,
     count_ip_pending, count_ip_total, count_global,
 )
-from pipeline.utils import sanitize_filename
+from pipeline.utils import sanitize_filename, check_env
+
+# 启动时校验必填环境变量
+check_env(role="server")
 from pipeline.llm import LLMCache
 from pipeline.feishu_db import create_user, login, get_user, update_user as feishu_update_user, search_records, update_password
 
@@ -106,8 +109,7 @@ app.add_middleware(
 
 
 # ── 用户会话 ──────────────────────────────────────────────────
-# token → user_id 的简单内存映射（重启后失效）
-_sessions: dict[str, str] = {}
+# 持久化到 SQLite，重启不丢失
 
 
 def _get_current_user(authorization: str = Header("")) -> dict | None:
@@ -115,7 +117,7 @@ def _get_current_user(authorization: str = Header("")) -> dict | None:
     if not authorization.startswith("Bearer "):
         return None
     token = authorization[7:]
-    user_id = _sessions.get(token)
+    user_id = db_get_session(token)
     if not user_id:
         return None
     return get_user(user_id)
@@ -125,6 +127,41 @@ def _get_current_user(authorization: str = Header("")) -> dict | None:
 _verify_codes: dict[str, dict] = {}
 _activation_tokens: dict[str, str] = {}
 _activated_emails: set[str] = set()  # 已激活邮箱列表
+
+# ── 登录失败限速 ─────────────────────────────────────────────
+MAX_LOGIN_ATTEMPTS = int(os.environ.get("MAX_LOGIN_ATTEMPTS", "5"))
+LOGIN_BAN_WINDOW = int(os.environ.get("LOGIN_BAN_WINDOW", "3600"))
+_login_attempts: dict[str, list[float]] = {}  # account -> [timestamp, ...]
+
+
+def _check_login_banned(account: str):
+    """检查账号是否被临时封禁，封禁则抛 429"""
+    now = time.time()
+    attempts = [t for t in _login_attempts.get(account, []) if t > now - LOGIN_BAN_WINDOW]
+    if attempts:
+        _login_attempts[account] = attempts
+    else:
+        _login_attempts.pop(account, None)
+
+    if len(_login_attempts.get(account, [])) >= MAX_LOGIN_ATTEMPTS:
+        raise HTTPException(
+            429,
+            f"登录失败次数过多，请 {LOGIN_BAN_WINDOW // 60} 分钟后再试",
+        )
+
+
+def _record_login_failure(account: str):
+    """记录一次登录失败"""
+    now = time.time()
+    attempts = _login_attempts.setdefault(account, [])
+    # 清理过期记录
+    _login_attempts[account] = [t for t in attempts if t > now - LOGIN_BAN_WINDOW]
+    _login_attempts[account].append(now)
+
+
+def _clear_login_attempts(account: str):
+    """登录成功后清除失败记录"""
+    _login_attempts.pop(account, None)
 
 SMTP_HOST = os.environ.get("SMTP_HOST", "")
 SMTP_PORT = int(os.environ.get("SMTP_PORT", "465"))
@@ -285,12 +322,17 @@ def auth_login(payload: dict, request: Request = None):
     password = payload.get("password", "")
     if not account or not password:
         raise HTTPException(400, "账号和密码不能为空")
+
+    _check_login_banned(account)
+
     user = login(account, password, ip=get_client_ip(request))
     if not user:
+        _record_login_failure(account)
         raise HTTPException(401, "账号或密码错误")
 
+    _clear_login_attempts(account)
     token = uuid.uuid4().hex
-    _sessions[token] = user["user_id"]
+    db_create_session(token, user["user_id"])
     return {"token": token, "user": user}
 
 
@@ -315,7 +357,7 @@ def auth_update(fields: dict, current_user: dict = Depends(_get_current_user)):
 def auth_logout(authorization: str = Header("")):
     """退出登录"""
     if authorization.startswith("Bearer "):
-        _sessions.pop(authorization[7:], None)
+        db_delete_session(authorization[7:])
     return {"success": True}
 
 
@@ -381,7 +423,64 @@ def forgot_password_reset(payload: dict):
 
 @app.get("/api/health")
 def health():
-    return {"status": "ok"}
+    """统一健康检查（磁盘 / 数据库 / Worker 存活）"""
+    import shutil
+
+    checks = {}
+    all_ok = True
+
+    # ── 数据库连通性 ──
+    try:
+        from pipeline.db import DATA_DIR as _dd
+        conn = __import__("pipeline.db", fromlist=["get_conn"]).get_conn()
+        conn.execute("SELECT 1").fetchone()
+        conn.close()
+        checks["database"] = "ok"
+    except Exception as e:
+        checks["database"] = f"error: {e}"
+        all_ok = False
+
+    # ── 磁盘空间 ──
+    try:
+        usage = shutil.disk_usage(DATA_DIR)
+        free_mb = usage.free // (1024 * 1024)
+        total_mb = usage.total // (1024 * 1024)
+        checks["disk"] = {
+            "free_mb": free_mb,
+            "total_mb": total_mb,
+            "usage_pct": round((usage.used / usage.total) * 100, 1),
+        }
+        if free_mb < 500:
+            checks["disk"]["warn"] = f"磁盘剩余不足（{free_mb}MB < 500MB）"
+            all_ok = False
+    except Exception as e:
+        checks["disk"] = {"error": str(e)}
+        all_ok = False
+
+    # ── Worker 心跳 ──
+    heartbeat_file = DATA_DIR / ".worker_heartbeat"
+    if heartbeat_file.exists():
+        try:
+            last_beat = float(heartbeat_file.read_text().strip())
+            age = time.time() - last_beat
+            checks["worker"] = {
+                "last_heartbeat_ago_s": round(age, 1),
+                "alive": age < 90,
+            }
+            if age >= 90:
+                checks["worker"]["warn"] = "Worker 心跳超过 90 秒未更新，疑似离线"
+                all_ok = False
+        except Exception as e:
+            checks["worker"] = {"error": str(e)}
+            all_ok = False
+    else:
+        checks["worker"] = {"status": "unknown", "detail": "无心跳文件（Worker 可能未启动）"}
+        # Worker 未启动不标记为整体不健康，只提示
+
+    return {
+        "status": "ok" if all_ok else "degraded",
+        "checks": checks,
+    }
 
 
 @app.post("/api/tasks")
@@ -478,11 +577,21 @@ def get_video(task_id: str):
         raise HTTPException(404, "任务不存在")
     if task["status"] != "completed":
         raise HTTPException(400, "视频尚未生成完成")
-    if not task["video_path"] or not os.path.exists(task["video_path"]):
+    if not task["video_path"]:
         raise HTTPException(404, "视频文件不存在")
 
+    from fastapi.responses import RedirectResponse
+    video_path = task["video_path"]
+
+    # S3/HTTP URL → 302 重定向
+    if video_path.startswith(("http://", "https://")):
+        return RedirectResponse(video_path)
+
+    # 本地路径 → FileResponse
+    if not os.path.exists(video_path):
+        raise HTTPException(404, "视频文件不存在")
     return FileResponse(
-        task["video_path"],
+        video_path,
         media_type="video/mp4",
         filename=f"{task_id}.mp4",
     )

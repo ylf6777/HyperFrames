@@ -56,3 +56,12 @@ export type AppRoute =
   | { type: 'home' }
   | { type: 'history' }
   | { type: 'task'; taskId: string };
+
+/** 任务状态中文名 */
+export const STATUS_LABEL: Record<string, string> = {
+  pending: '排队中',
+  processing: '处理中',
+  completed: '已完成',
+  failed: '失败',
+  cancelled: '已取消',
+};

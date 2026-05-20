@@ -1,19 +1,12 @@
 import { useEffect, useState } from 'react';
 import { getTask, getVideoUrl, cancelTask } from '../api';
 import type { Task } from '../types';
+import { STATUS_LABEL } from '../types';
 
 interface Props {
   taskId: string;
   onCancel?: () => void;
 }
-
-const STATUS_LABELS: Record<string, string> = {
-  pending: '排队中',
-  processing: '处理中',
-  completed: '已完成',
-  failed: '失败',
-  cancelled: '已取消',
-};
 
 const STATUS_ICONS: Record<string, string> = {
   pending: '⏳',
@@ -26,14 +19,13 @@ const STATUS_ICONS: Record<string, string> = {
 export default function TaskProgress({ taskId, onCancel }: Props) {
   const [task, setTask] = useState<Task | null>(null);
   const [error, setError] = useState('');
-  const [elapsed, setElapsed] = useState(0);
+  const [now, setNow] = useState(Date.now());
   const [cancelling, setCancelling] = useState(false);
   const [showConfirm, setShowConfirm] = useState(false);
 
   useEffect(() => {
     let active = true;
     let timer: ReturnType<typeof setTimeout>;
-    let elapsedTimer: ReturnType<typeof setInterval>;
 
     const poll = async () => {
       try {
@@ -50,18 +42,18 @@ export default function TaskProgress({ taskId, onCancel }: Props) {
       }
     };
 
-    // 已等待计时器
-    elapsedTimer = setInterval(() => {
-      setElapsed(e => e + 1);
-    }, 1000);
-
     poll();
     return () => {
       active = false;
       clearTimeout(timer);
-      clearInterval(elapsedTimer);
     };
   }, [taskId]);
+
+  // 每秒更新 now，用于从 created_at 算已等待时间
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, []);
 
   const handleCancelClick = () => {
     setShowConfirm(true);
@@ -108,7 +100,7 @@ export default function TaskProgress({ taskId, onCancel }: Props) {
     <div className={`status-card status-${task.status}`} data-testid="status-card">
       <div className="status-header">
         <span className="status-icon">{STATUS_ICONS[task.status]}</span>
-        <span className="status-label">{STATUS_LABELS[task.status]}</span>
+        <span className="status-label">{STATUS_LABEL[task.status]}</span>
       </div>
 
       {task.status === 'cancelled' && (
@@ -122,11 +114,11 @@ export default function TaskProgress({ taskId, onCancel }: Props) {
       )}
 
       {task.status !== 'cancelled' && (
-        <p className="progress-text">{task.progress || STATUS_LABELS[task.status]}</p>
+        <p className="progress-text">{task.progress || STATUS_LABEL[task.status]}</p>
       )}
 
-      {task.status !== 'cancelled' && !isFinal && elapsed > 3 && (
-        <p className="elapsed-text">已等待 {formatElapsed(elapsed)}</p>
+      {task.status !== 'cancelled' && !isFinal && task.created_at && (
+        <p className="elapsed-text">已等待 {formatElapsed(Math.floor(now / 1000 - task.created_at))}</p>
       )}
 
       <div className="status-meta">
