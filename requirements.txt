@@ -4,6 +4,11 @@ uvicorn[standard]
 python-multipart
 requests
 
+# 文档读取（.docx / .pdf / .doc）
+python-docx
+pypdf
+olefile
+
 # PostgreSQL 模式（可选）
 # pip install psycopg2-binary
 # DB_TYPE=postgres DATABASE_URL=postgresql://user:pass@host/db uvicorn server:app
