@@ -31,6 +31,27 @@ PARAM = "%s" if DB_TYPE == "postgres" else "?"
 
 # ── 连接工厂 ───────────────────────────────────────────────
 
+class _PGConn:
+    """psycopg2 连接包装类：提供 .execute() 快捷方法"""
+
+    def __init__(self, conn):
+        self._conn = conn
+
+    def __getattr__(self, name):
+        return getattr(self._conn, name)
+
+    def execute(self, sql, params=None):
+        cur = self._conn.cursor()
+        cur.execute(sql, params)
+        return cur
+
+    def cursor(self, **kw):
+        return self._conn.cursor(**kw)
+
+    def close(self):
+        self._conn.close()
+
+
 def get_conn():
     if DB_TYPE == "postgres":
         import psycopg2
@@ -50,8 +71,7 @@ def get_conn():
             parent.close()
             conn = psycopg2.connect(dsn)
             print(f"[db] 数据库 '{db_name}' 创建成功")
-        conn.execute("SET statement_timeout = '5s'")
-        return conn
+        return _PGConn(conn)
     # SQLite
     import sqlite3
     conn = sqlite3.connect(str(DB_PATH))
@@ -99,7 +119,8 @@ def init_db():
     try:
         conn.execute("ALTER TABLE tasks ADD COLUMN client_ip TEXT DEFAULT ''")
     except Exception:
-        pass
+        if DB_TYPE == "postgres":
+            conn._conn.rollback()  # 防止事务中断
 
     conn.execute("""
         CREATE TABLE IF NOT EXISTS sessions (
