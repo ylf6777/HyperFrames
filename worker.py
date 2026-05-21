@@ -134,7 +134,7 @@ def run_task(task_id: str):
             db_update_task(
                 task_id,
                 status="failed",
-                error="生成失败，详情请查看服务端日志",
+                error=result.get("error", "生成失败，详情请查看服务端日志"),
                 progress="失败",
                 updated_at=time.time(),
             )

@@ -8,7 +8,7 @@ import os
 import re
 import time
 from pathlib import Path
-from typing import Tuple
+from typing import Callable, Tuple
 
 SUMMARIZE_PROMPT = """你是一个幼儿教育专家。分析下面的教案文档，提取一份结构化的摘要，供后续视频制作使用。
 
@@ -174,7 +174,7 @@ def call_claude_api(
     api_base: str | None = None,
     model: str = "claude-sonnet-4-6",
     cache_dir: str | None = None,
-    on_progress: callable | None = None,
+    on_progress: Callable | None = None,
 ) -> Tuple[str, str]:
     """两轮 LLM 调用: 先总结文档, 再根据总结生成剧本+HTML，返回 (script, html)。
 

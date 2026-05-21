@@ -7,6 +7,8 @@ import shutil
 import tempfile
 from pathlib import Path
 
+from typing import Callable
+
 from pipeline.utils import info, success, warn, error, step, find_project_dir, check_disk_space, ensure_template
 from pipeline.reader import read_document
 from pipeline.llm import call_claude_api
@@ -26,8 +28,8 @@ def generate_video(
     output: str | None = None,
     skip_llm: bool = False,
     dry_run: bool = False,
-    on_progress: callable | None = None,
-    should_cancel: callable | None = None,
+    on_progress: Callable | None = None,
+    should_cancel: Callable | None = None,
 ) -> dict:
     """运行全自动文档→视频管线，返回结果字典。
 
@@ -40,6 +42,8 @@ def generate_video(
             "html_path": "path/to/index.html",
             "duration": 45.0,
             "steps": { "llm": True/False/None, "tts": True/False/None, "render": True/False/None },
+            "error": "错误描述" or "",
+            "cancelled": True/False,
         }
     """
     result = {
@@ -50,6 +54,7 @@ def generate_video(
         "html_path": None,
         "duration": 0,
         "steps": {"llm": None, "tts": None, "render": None},
+        "error": "",
     }
 
     def _progress(msg: str):
@@ -60,12 +65,16 @@ def generate_video(
         if should_cancel and should_cancel():
             warn(msg)
             _progress(msg)
+            result["error"] = msg
+            result["cancelled"] = True
             return True
         return False
 
     input_path = Path(input_path)
     if not input_path.exists():
-        error(f"输入文件不存在: {input_path}")
+        msg = f"输入文件不存在: {input_path}"
+        error(msg)
+        result["error"] = msg
         return result
 
     project_name = project or input_path.stem.replace(" ", "_").replace("《", "").replace("》", "")
@@ -76,7 +85,9 @@ def generate_video(
     try:
         document_text = read_document(str(input_path))
     except Exception as e:
-        error(f"文档读取失败: {e}")
+        msg = f"文档读取失败: {e}"
+        error(msg)
+        result["error"] = msg
         return result
     info(f"读取到 {len(document_text)} 字符")
     _progress("文档读取完成")
@@ -109,7 +120,9 @@ def generate_video(
         _model = model or os.environ.get("HF_MODEL") or "claude-sonnet-4-6"
 
         if not _api_key:
-            error("需要 API Key！请设置 HYPERFRAMES_API_KEY 环境变量")
+            msg = "需要 API Key！请设置 HYPERFRAMES_API_KEY 环境变量"
+            error(msg)
+            result["error"] = msg
             _cleanup()
             return result
 
@@ -121,7 +134,9 @@ def generate_video(
                 on_progress=_progress,
             )
         except Exception as e:
-            error(f"AI 内容生成失败: {e}")
+            msg = f"AI 内容生成失败: {e}"
+            error(msg)
+            result["error"] = msg
             _cleanup()
             return result
 
@@ -130,7 +145,9 @@ def generate_video(
         try:
             write_project_files(project_dir, script_content, html_content)
         except Exception as e:
-            error(f"写入项目文件失败: {e}")
+            msg = f"写入项目文件失败: {e}"
+            error(msg)
+            result["error"] = msg
             _cleanup()
             return result
 
@@ -156,7 +173,9 @@ def generate_video(
         return result
 
     if not project_dir:
-        error("项目目录未确定，无法继续")
+        msg = "项目目录未确定，无法继续"
+        error(msg)
+        result["error"] = msg
         _cleanup()
         return result
 
@@ -189,6 +208,7 @@ def generate_video(
             warn("narration.wav 未找到，检查 TTS 输出")
     else:
         error("TTS 生成失败，视频将无配音")
+        result["error"] = "TTS 生成失败"
 
     if _check_cancel():
         _cleanup()
@@ -201,7 +221,9 @@ def generate_video(
     # 渲染前检查磁盘空间
     ok, free_mb = check_disk_space(project_dir)
     if not ok:
-        error(f"磁盘空间不足（剩余 {free_mb}MB），无法渲染")
+        msg = f"磁盘空间不足（剩余 {free_mb}MB），无法渲染"
+        error(msg)
+        result["error"] = msg
         _cleanup()
         return result
 
@@ -224,7 +246,9 @@ def generate_video(
         try:
             shutil.copy2(str(output_mp4), str(output_path))
         except Exception as e:
-            error(f"复制视频文件失败: {e}")
+            msg = f"复制视频文件失败: {e}"
+            error(msg)
+            result["error"] = msg
             _cleanup()
             return result
 
@@ -243,6 +267,7 @@ def generate_video(
         result["success"] = True
     else:
         error("未找到渲染输出的 MP4 文件")
+        result["error"] = "未找到渲染输出的 MP4 文件"
 
     _cleanup()
     return result
