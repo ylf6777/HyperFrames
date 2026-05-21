@@ -16,7 +16,7 @@ FROM python:3.11-slim
 
 # 安装 Node.js 22（HyperFrames CLI 依赖 npx）
 RUN apt-get update && \
-    apt-get install -y curl gnupg && \
+    apt-get install -y curl gnupg libpq-dev && \
     curl -fsSL https://deb.nodesource.com/setup_22.x | bash - && \
     apt-get install -y nodejs && \
     apt-get clean && rm -rf /var/lib/apt/lists/*
