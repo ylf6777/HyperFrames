@@ -32,96 +32,24 @@ SUMMARIZE_PROMPT = """你是一个幼儿教育专家。分析下面的教案文�
 
 **要求：摘要总字数控制在 1200 字以内。**"""
 
-GENERATION_SYSTEM_PROMPT = """你是一个儿童教育视频制作专家。根据提供的教案摘要，生成两个文件：
+GENERATION_SYSTEM_PROMPT = """你是一个儿童教育视频制作专家。根据教案摘要生成script.txt和index.html。
 
-## 文件 1: script.txt
-用简单口语化的中文撰写旁白脚本，适合 3-5 岁儿童理解。
-- 使用短句，每句话独立成行
-- 语言生动活泼，带情感
-- 总时长控制在 40-60 秒（约 150-300 字）
-- **每段之间用空行分隔，第一段是开场引入（对应标题场景），后续段落对应各知识点**
-- **段落数必须等于 HTML 场景数，每个段落按顺序对应一个场景（绝对不能多段或少段）**
+script.txt：口语化中文旁白，短句独立成行，生动活泼。总时长40-60秒（150-300字）。段落数=HTML场景数，第一段开场引入，后续每段对应一个场景。
 
-## 文件 2: index.html
-根据脚本内容生成完整的 HyperFrames 合成 HTML 文件。
+index.html：HyperFrames合成HTML，1920x1080。配色：#FFF8E7背景 #FF6B6B珊瑚红 #4ECDC4青绿 #3D2E1E深褐。每场景一个emoji。字体：Microsoft YaHei, PingFang SC。
 
-### 设计要求：
-- 温暖明亮的配色：#FFF8E7 背景，#FF6B6B 珊瑚红，#4ECDC4 青绿色，#3D2E1E 深褐文字
-- 使用 emoji 图标增强画面趣味性（每个场景一个主 emoji）
-- 字体: font-family "Microsoft YaHei", "PingFang SC", sans-serif
-- 分辨率: 1920x1080
-
-### 场景结构（必须严格遵守）：
-根据内容需要灵活决定场景数量（5-8 个），但必须遵循以下规则：
-
-**1. 场景 div 格式：**
-```html
-<div id="scene1" class="scene scene-s1 clip" data-start="0" data-duration="6" data-track-index="1">
-  <div class="emoji-main">🧸</div>
-  <div class="title">大标题</div>
-  <div class="content">正文内容</div>
+场景格式（5-8个，按内容定数量）：
+<div id="sceneN" class="scene scene-sN clip" data-start="X" data-duration="Y" data-track-index="N">
+  <div class="emoji-main">🧸</div><div class="title">标题</div><div class="content">内容</div>
 </div>
-<div id="scene2" class="scene scene-s2 clip" data-start="6" data-duration="8" data-track-index="2">
-  ...
-</div>
-```
-- id 必须是 `scene1`, `scene2`, `scene3`... 数字紧跟在 scene 后面
-- **每个场景容器必须有 `class="scene scene-sN clip"`**（按顺序 s1, s2, s3...）
-- **每个场景容器必须有 `data-track-index="1"`、`data-track-index="2"`... 依次递增**
-- **只有场景容器（.scene）加 `class="clip"`，里面的内容元素不要加 clip**
-- 第一个场景必须是独立的标题场景（配 emoji + 大标题）
-- 每个场景使用不同的渐变背景色
-- 最后一个场景结束前留 1-1.5s 淡出
+规则：id从scene1递增；class="scene scene-sN clip"；data-track-index从1递增；首场景为标题场景；末场景结束前1-1.5s淡出。
 
-### GSAP 动画规则（必须严格遵守）：
-- 必须使用 **静态绝对时间位置** 作为 `tl.from()` 的第三个参数
-- **禁止**使用动态循环、`delay` 属性或 `tl.time()` 计算位置
-- 每个场景的动画时间 = 该场景的 data-start + 固定偏移量（0.2-0.5s）
-- 同一场景内不同元素错开 0.3-0.5s
-- 动画时长 0.4-0.6s
+GSAP动画：用绝对时间位置作为tl.from()第三参数，禁止delay。eases：emoji用back.out(1.7)、内容用power3.out。禁用exit动画（末场景淡出除外）。时间线：window.__timelines["main"]=gsap.timeline({paused:true})
 
-**正确的 GSAP 写法示例：**
-```js
-// 场景1（标题）: 元素在场景开始后依次入场
-tl.from('#scene1 .emoji-main', { opacity: 0, scale: 0.5, y: -60, duration: 0.6, ease: "back.out(1.7)" }, 0.3);
-tl.from('#scene1 .title',      { opacity: 0, y: 40, duration: 0.5, ease: "power3.out" },             0.8);
-tl.from('#scene1 .subtitle',   { opacity: 0, y: 30, duration: 0.5, ease: "power2.out" },             1.3);
+音频：<audio id="narration" data-start="0" data-duration="总秒数" data-track-index="0" src="narration.wav"></audio>
+根元素：<div id="root" data-composition-id="main" data-start="0" data-duration="总秒数" data-width="1920" data-height="1080">
 
-// 场景2（内容）: 场景起始于 6s，元素在 6.3s / 6.8s 入场
-tl.from('#scene2 .emoji-main', { opacity: 0, scale: 0, rotation: -20, duration: 0.5, ease: "back.out(1.7)" }, 6.3);
-tl.from('#scene2 .content',    { opacity: 0, x: -40, duration: 0.5, ease: "power3.out" },                      6.8);
-
-// ...后面场景以此类推
-
-// 最后一个场景在结束前淡出
-tl.to('#scene6', { opacity: 0, duration: 1.5, ease: "power2.inOut" }, 43.5);
-```
-
-- eases: `back.out(1.7)`（emoji 类）、`power3.out`（内容类）、`power2.out`（副标题）
-- 禁用所有 exit 动画（最后一个场景的淡出除外）
-
-### 场景可见性管理：
-HyperFrames 会自动管理 `clip` 元素的可见性，**不需要手动添加 updateScenes 函数**。
-只需在 CSS 中设置 `.scene { opacity: 1 }`（不要设置 opacity: 0）。
-HyperFrames 会在每个场景的 data-start 到 data-duration 范围内自动显示场景。
-
-### 时间线注册（使用 `<script src="https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js"></script>`）：
-```js
-window.__timelines = window.__timelines || {};
-window.__timelines["main"] = gsap.timeline({ paused: true });
-```
-
-### 音频元素（文件末尾）：
-```html
-<audio id="narration" data-start="0" data-duration="总秒数" data-track-index="0" src="narration.wav" data-volume="1"></audio>
-```
-
-### 视频文件元数据（开头的 #root 元素）：
-```html
-<div id="root" data-composition-id="main" data-start="0" data-duration="总秒数" data-width="1920" data-height="1080">
-```
-
-输出格式: 先输出 script.txt 内容（用 ```script 标记），再输出 index.html 内容（用 ```html 标记）。"""
+先输出```script，再输出```html。"""
 
 # ── LLM 缓存 ─────────────────────────────────────────────────
 _PROMPT_HASH = hashlib.sha256(
